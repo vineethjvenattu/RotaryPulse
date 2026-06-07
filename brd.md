@@ -90,18 +90,12 @@ The application will support four primary user roles, each with distinct permiss
 - **Accessibility (a11y)**: Clean contrasts, clear touch targets, and legible typography (e.g., Inter, Outfit, or Roboto) suitable for older members.
 - **Premium Aesthetics**: Clean dark/light mode accents, sleek shadows, modern borders, and glassmorphic card patterns.
 
-### 4.2. Database & Hosting Options
-To move away from Glide Apps and build a custom, performant, and scalable web application, we have two primary options:
-
-1. **Option A: Firebase / Firestore (Recommended)**
-   - No relational database setup overhead.
-   - Real-time updates for attendance and announcements.
-   - Free tier is highly sufficient for a single Rotary Chapter (~100-300 members).
-   - Firebase Auth simplifies Google and Phone OTP integrations.
-2. **Option B: Google Sheets API**
-   - Keeps the database in Google Sheets as requested in the mockup.
-   - Simpler data updates for admins who prefer editing spreadsheets directly.
-   - High latency compared to Firestore and potential API rate limits.
+### 4.2. Database & Hosting Selection (Selected: Firebase)
+The application will utilize **Firebase** as its backend suite:
+- **Cloud Firestore**: Used for storing member directories, event details, RSVPs, attendance logs, announcements, and payment transaction metadata in real-time.
+- **Firebase Authentication**: Handles Google Sign-In, Email/Password, and Phone OTP authentication.
+- **Firebase Storage**: Stores member profile pictures and event photo albums.
+- **Firebase Hosting**: For deploying the responsive front-end web application.
 
 ---
 
