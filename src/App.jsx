@@ -10,6 +10,7 @@ import { Attendance } from './pages/Attendance';
 import { Payments } from './pages/Payments';
 import { Announcements } from './pages/Announcements';
 import { Profile } from './pages/Profile';
+import { MeetingConsole } from './pages/MeetingConsole';
 import { Calendar, MapPin, Clock, X, Check, CheckSquare } from 'lucide-react';
 import './index.css';
 
@@ -21,7 +22,11 @@ function AppContent() {
     events: [],
     attendance: [],
     payments: [],
-    announcements: []
+    announcements: [],
+    tasks: [],
+    projectNotes: [],
+    minutes: [],
+    opinions: []
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -129,7 +134,7 @@ function AppContent() {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} />;
+        return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} refreshData={refreshData} />;
       case 'members':
         return <Members data={data} loading={loading} />;
       case 'events':
@@ -142,8 +147,10 @@ function AppContent() {
         return <Announcements data={data} loading={loading} refreshData={refreshData} />;
       case 'profile':
         return <Profile />;
+      case 'meeting-console':
+        return <MeetingConsole data={data} loading={loading} refreshData={refreshData} />;
       default:
-        return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} />;
+        return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} refreshData={refreshData} />;
     }
   };
 
