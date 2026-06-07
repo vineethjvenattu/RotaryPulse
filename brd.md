@@ -90,53 +90,65 @@ The application will support four primary user roles, each with distinct permiss
 - **Accessibility (a11y)**: Clean contrasts, clear touch targets, and legible typography (e.g., Inter, Outfit, or Roboto) suitable for older members.
 - **Premium Aesthetics**: Clean dark/light mode accents, sleek shadows, modern borders, and glassmorphic card patterns.
 
-### 4.2. Database & Hosting Selection (Selected: Firebase)
-The application will utilize **Firebase** as its backend suite:
-- **Cloud Firestore**: Used for storing member directories, event details, RSVPs, attendance logs, announcements, and payment transaction metadata in real-time.
-- **Firebase Authentication**: Handles Google Sign-In, Email/Password, and Phone OTP authentication.
-- **Firebase Storage**: Stores member profile pictures and event photo albums.
-- **Firebase Hosting**: For deploying the responsive front-end web application.
+### 4.2. Database & Hosting Selection (Selected: Google Sheets & Free Hosting)
+The application will utilize **Google Sheets** as its primary database, keeping operations 100% free and easy to manage for administrators:
+- **Database (Google Sheets)**: All club data (Members, Events, Attendance, Payments, Announcements) will reside in a Google Sheets workbook.
+- **Backend API Integration**: 
+  - **Option A (Recommended): Google Apps Script Web App**: A custom script deployed inside the Google Sheet that acts as a REST API proxy (GET/POST) to read and write data securely without API key management overhead.
+  - **Option B: Google Sheets API (v4)**: Integration via Google Cloud Service Account.
+- **Authentication**: 
+  - Since Google Sheets does not have built-in authentication, we will implement a simple secure member verification system (e.g. email-based verification, password/PIN column in the Members sheet, or a free Firebase Auth/Google Sign-In flow linked to the Sheet's email records).
+- **Frontend Hosting**: Deployed on Vercel, Netlify, or GitHub Pages.
 
 ---
 
-## 5. Proposed Data Schema (Firestore-aligned)
+## 5. Proposed Data Schema (Google Sheets Database Structure)
 
-### 5.1. Members Collection
-- `uid` (string, PK): Firebase Auth UID
-- `name` (string)
-- `mobile` (string)
-- `email` (string)
-- `role` (string: Member, Secretary, Treasurer, President)
-- `classification` (string)
-- `bloodGroup` (string)
-- `birthday` (timestamp)
-- `anniversary` (timestamp)
-- `joinDate` (timestamp)
-- `profilePicUrl` (string)
+### 5.1. Members Sheet
+- `Member ID` (string, PK) - e.g. M001
+- `Name` (string)
+- `Mobile` (string)
+- `Email` (string)
+- `Role` (string: Member, Secretary, Treasurer, President)
+- `Classification` (string) - e.g. Real Estate, Education
+- `Blood Group` (string)
+- `Birthday` (string/date)
+- `Anniversary` (string/date)
+- `Join Date` (string/date)
+- `Password/PIN` (string, hashed) - For member login verification
 
-### 5.2. Events Collection
-- `eventId` (string, PK)
-- `title` (string)
-- `date` (timestamp)
-- `time` (string)
-- `venue` (string)
-- `type` (string: Meeting, Service, Social)
-- `description` (string)
-- `rsvpCount` (integer)
+### 5.2. Events Sheet
+- `Event ID` (string, PK) - e.g. E001
+- `Event Name` (string)
+- `Date` (string/date)
+- `Time` (string)
+- `Venue` (string)
+- `Type` (string: Meeting, Service, Social)
+- `Description` (string)
 
-### 5.3. Attendance Collection
-- `attendanceId` (string, PK)
-- `eventId` (string, FK)
-- `memberId` (string, FK)
-- `status` (string: Present, Absent)
-- `timestamp` (timestamp)
+### 5.3. Attendance Sheet
+- `Attendance ID` (string, PK) - e.g. AD01
+- `Event ID` (string, FK)
+- `Event Name` (string)
+- `Member ID` (string, FK)
+- `Member Name` (string)
+- `Status` (string: Present, Absent)
+- `Date` (string/date)
 
-### 5.4. Payments Collection
-- `paymentId` (string, PK)
-- `memberId` (string, FK)
-- `amount` (number)
-- `description` (string)
-- `status` (string: Paid, Pending, Overdue)
-- `dueDate` (timestamp)
-- `paidDate` (timestamp)
-- `transactionReference` (string)
+### 5.4. Payments / Dues Sheet
+- `Payment ID` (string, PK) - e.g. P001
+- `Member ID` (string, FK)
+- `Member Name` (string)
+- `Amount` (number)
+- `Description` (string)
+- `Status` (string: Paid, Pending)
+- `Due Date` (string/date)
+- `Paid Date` (string/date)
+- `Reference` (string)
+
+### 5.5. Announcements Sheet
+- `Announcement ID` (string, PK) - e.g. AN01
+- `Date` (string/date)
+- `Title` (string)
+- `Content` (string)
+- `Created By` (string)
