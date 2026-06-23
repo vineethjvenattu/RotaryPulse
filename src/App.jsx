@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import { api } from './services/api';
 import { Navigation } from './components/Navigation';
@@ -10,13 +10,98 @@ import { Attendance } from './pages/Attendance';
 import { Payments } from './pages/Payments';
 import { Announcements } from './pages/Announcements';
 import { Profile } from './pages/Profile';
+import { Gallery } from './pages/Gallery';
 import { MeetingConsole } from './pages/MeetingConsole';
+import { SuperAdminDashboard } from './pages/SuperAdminDashboard';
+import { InductLanding } from './pages/InductLanding';
 import { Calendar, MapPin, Clock, X, Check, CheckSquare } from 'lucide-react';
 import './index.css';
+import logoImg from './assets/rotary-logo.png';
+
+class GlobalErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("GlobalErrorBoundary caught an error:", error, errorInfo);
+    this.setState({ errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '20px', background: '#fee2e2', color: '#991b1b', borderRadius: '8px', margin: '20px' }}>
+          <h2>Something went wrong.</h2>
+          <p style={{ fontWeight: 'bold' }}>{this.state.error && this.state.error.toString()}</p>
+          <pre style={{ fontSize: '11px', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+            {this.state.errorInfo && this.state.errorInfo.componentStack}
+          </pre>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>Reload</button>
+        </div>
+      );
+    }
+    return this.props.children; 
+  }
+}
+
+
+const SplashScreen = ({ status }) => (
+  <div className="splash-container">
+    <div className="splash-content">
+      <img 
+        src={logoImg} 
+        alt="Rotary Logo" 
+        className="splash-logo"
+      />
+      <h1 className="splash-title">
+        <span className="splash-title-white">Rotary</span>
+        <span className="splash-title-gold">Connect</span>
+      </h1>
+      <div className="splash-subtitle">
+        <div>Stronger Together,</div>
+        <div>Serving Better</div>
+      </div>
+      <div className="splash-loader-bar">
+        <div className="splash-loader-progress"></div>
+      </div>
+      <p className="splash-status">{status}</p>
+    </div>
+    <img 
+      src={logoImg} 
+      alt="Rotary Watermark" 
+      className="splash-watermark" 
+    />
+  </div>
+);
+
 
 function AppContent() {
   const { currentUser, loading: authLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const page = params.get('page') || params.get('tab');
+    const stored = sessionStorage.getItem('rc_active_tab');
+    const validTabs = ['dashboard', 'members', 'events', 'attendance', 'payments', 'announcements', 'profile', 'gallery', 'meeting-console'];
+    if (page && validTabs.includes(page)) return page;
+    if (stored && validTabs.includes(stored)) return stored;
+    return 'dashboard';
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem('rc_active_tab', activeTab);
+    // Keep URL in sync and clear any stale pathnames (like /login)
+    const newUrl = `${window.location.origin}/?page=${activeTab}`;
+    if (window.location.href !== newUrl) {
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [activeTab]);
+
   const [data, setData] = useState({
     members: [],
     events: [],
@@ -31,15 +116,26 @@ function AppContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Enforce landing screen staying minimum 5 seconds
+  const [splashTimeoutFinished, setSplashTimeoutFinished] = useState(false);
+
   // Self check-in state
   const [checkinEventId, setCheckinEventId] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmSuccess, setConfirmSuccess] = useState(false);
   const [confirmError, setConfirmError] = useState('');
 
-  const refreshData = async () => {
+  // Enforce minimum 5 seconds splash display
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSplashTimeoutFinished(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const refreshData = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const result = await api.fetchAllData();
       if (result.success) {
         setData(result.data);
@@ -49,17 +145,24 @@ function AppContent() {
     } catch (err) {
       setError('Connection error occurred');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   // Intercept QR code search params on mount
+  const [inductChapterId, setInductChapterId] = useState(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const action = params.get('action');
     const eventId = params.get('eventId');
+    const inductParam = params.get('induct');
+    
     if (action === 'checkin' && eventId) {
       setCheckinEventId(eventId);
+    }
+    if (inductParam) {
+      setInductChapterId(inductParam);
     }
   }, []);
 
@@ -68,6 +171,30 @@ function AppContent() {
     if (currentUser) {
       refreshData();
     }
+  }, [currentUser]);
+
+  // Silently re-fetch when the user switches back to this tab (handles cross-session updates in mock mode)
+  useEffect(() => {
+    if (!currentUser) return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshData(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [currentUser]);
+
+  // Immediately sync when another tab writes to localStorage (same-origin cross-session updates)
+  useEffect(() => {
+    if (!currentUser) return;
+    const handleStorageEvent = (e) => {
+      if (e.key === 'rc_payments' || e.key === 'rc_announcements' || e.key === 'rc_members' || e.key === 'rc_payment_edits') {
+        refreshData(true);
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+    return () => window.removeEventListener('storage', handleStorageEvent);
   }, [currentUser]);
 
   const handleSelfCheckin = async () => {
@@ -102,11 +229,10 @@ function AppContent() {
 
       if (result.success) {
         setConfirmSuccess(true);
-        setTimeout(async () => {
+        setTimeout(() => {
           setCheckinEventId(null);
-          // Remove query parameters from URL
-          window.history.replaceState({}, document.title, window.location.pathname);
-          await refreshData();
+          // Redirect to meeting/dashboard screen and clear checkin params
+          window.location.replace(window.location.origin + window.location.pathname + '?page=dashboard');
         }, 1800);
       } else {
         setConfirmError(result.error || 'Failed to submit check-in');
@@ -118,25 +244,38 @@ function AppContent() {
     }
   };
 
-  if (authLoading) {
-    return (
-      <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)' }}>
-        <p style={{ fontWeight: 600, color: 'var(--rotary-blue)' }}>Authorizing Member Session...</p>
-      </div>
-    );
+  // Show splash landing screen for minimum 5 seconds OR while auth session is loading
+  if (authLoading || !splashTimeoutFinished) {
+    return <SplashScreen status={authLoading ? "Authorizing session..." : "Loading Rotary Connect..."} />;
+  }
+
+  // Handle Induction link
+  if (inductChapterId) {
+    return <InductLanding inductChapterId={inductChapterId} onBack={() => {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setInductChapterId(null);
+    }} />;
   }
 
   if (!currentUser) {
-    return <Login />;
+    return <Login onLoginSuccess={() => setActiveTab('dashboard')} />;
   }
 
   // Render current view
   const renderTabContent = () => {
+    if (currentUser?.isSuperAdmin) {
+      if (activeTab === 'dashboard') return <SuperAdminDashboard data={data} loading={loading} refreshData={refreshData} />;
+      if (activeTab === 'profile') return <Profile />;
+      if (activeTab === 'gallery') return <Gallery />;
+      // Super Admin uses dashboard by default for other tabs, or we can add more admin tabs here later
+      return <SuperAdminDashboard data={data} loading={loading} refreshData={refreshData} />;
+    }
+
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} refreshData={refreshData} />;
       case 'members':
-        return <Members data={data} loading={loading} />;
+        return <Members data={data} loading={loading} refreshData={refreshData} />;
       case 'events':
         return <Events data={data} loading={loading} refreshData={refreshData} />;
       case 'attendance':
@@ -147,8 +286,10 @@ function AppContent() {
         return <Announcements data={data} loading={loading} refreshData={refreshData} />;
       case 'profile':
         return <Profile />;
+      case 'gallery':
+        return <Gallery />;
       case 'meeting-console':
-        return <MeetingConsole data={data} loading={loading} refreshData={refreshData} />;
+        return <MeetingConsole data={data} loading={loading} refreshData={refreshData} setActiveTab={setActiveTab} />;
       default:
         return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} refreshData={refreshData} />;
     }
@@ -156,7 +297,7 @@ function AppContent() {
 
   return (
     <div className="app-container">
-      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} data={data} />
       <main className="app-main">
         {error && (
           <div className="content-area" style={{ paddingBottom: 0 }}>
@@ -264,6 +405,8 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AppContent />
+    <GlobalErrorBoundary>
+      <AppContent />
+    </GlobalErrorBoundary>
   );
 }

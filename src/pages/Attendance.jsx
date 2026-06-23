@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
+import { Avatar } from '../components/Avatar';
 import { Check, X, Users, Search, AlertCircle, Save, QrCode } from 'lucide-react';
 import './pages.css';
 
@@ -218,11 +219,7 @@ export const Attendance = ({ data, loading, refreshData }) => {
                   return (
                     <div key={m["Member ID"]} className="attendance-member-row">
                       <div className="attendance-member-info">
-                        <img 
-                          src={m["Image"] || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100"} 
-                          alt={m["Name"]} 
-                          className="attendance-avatar"
-                        />
+                        <Avatar member={m} size={48} className="attendance-avatar" />
                         <div>
                           <div className="attendance-name">{m["Name"]}</div>
                           <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ID: {m["Member ID"]}</span>

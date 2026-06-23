@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, setApiChapterId } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -8,10 +8,16 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   // Check for cached user session on mount
+  // Use sessionStorage (per-tab) first, fall back to localStorage for single-tab persistence
   useEffect(() => {
-    const cachedUser = localStorage.getItem("rc_user_session");
+    const sessionUser = sessionStorage.getItem("rc_user_session");
+    const cachedUser = sessionUser || localStorage.getItem("rc_user_session");
     if (cachedUser) {
-      setCurrentUser(JSON.parse(cachedUser));
+      const parsed = JSON.parse(cachedUser);
+      setCurrentUser(parsed);
+      setApiChapterId(parsed.chapterId);
+      // Ensure sessionStorage has the value for this tab
+      sessionStorage.setItem("rc_user_session", JSON.stringify(parsed));
     }
     setLoading(false);
   }, []);
@@ -20,6 +26,9 @@ export const AuthProvider = ({ children }) => {
     const result = await api.login(email, pin);
     if (result.success && result.member) {
       setCurrentUser(result.member);
+      setApiChapterId(result.member.chapterId);
+      // Store in both: sessionStorage for this tab, localStorage for cross-refresh persistence
+      sessionStorage.setItem("rc_user_session", JSON.stringify(result.member));
       localStorage.setItem("rc_user_session", JSON.stringify(result.member));
     }
     return result;
@@ -29,6 +38,8 @@ export const AuthProvider = ({ children }) => {
     const result = await api.setPin(email, pin);
     if (result.success && result.member) {
       setCurrentUser(result.member);
+      setApiChapterId(result.member.chapterId);
+      sessionStorage.setItem("rc_user_session", JSON.stringify(result.member));
       localStorage.setItem("rc_user_session", JSON.stringify(result.member));
     }
     return result;
@@ -36,6 +47,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     setCurrentUser(null);
+    sessionStorage.removeItem("rc_user_session");
     localStorage.removeItem("rc_user_session");
   };
 

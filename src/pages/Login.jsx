@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { RotaryLogo } from '../components/Navigation';
-import { Mail, Lock, Key, AlertCircle } from 'lucide-react';
+import { Mail, Lock, Key, AlertCircle, Phone, ArrowLeft } from 'lucide-react';
+import { Register } from './Register';
+import logoImg from '../assets/rotary-logo.png';
 import './pages.css';
 
-export const Login = () => {
+export const Login = ({ onLoginSuccess }) => {
   const { login, setupPin } = useAuth();
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Set PIN Flow
+  // View states: 'options' | 'email' | 'register'
+  const [activeView, setActiveView] = useState('options');
   const [isSettingUpPin, setIsSettingUpPin] = useState(false);
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -31,6 +34,8 @@ export const Login = () => {
         } else {
           setError(result.error || 'Authentication failed');
         }
+      } else if (onLoginSuccess) {
+        onLoginSuccess();
       }
     } catch (err) {
       setError('An error occurred during quick login');
@@ -57,6 +62,8 @@ export const Login = () => {
         } else {
           setError(result.error || 'Authentication failed');
         }
+      } else if (onLoginSuccess) {
+        onLoginSuccess();
       }
     } catch (err) {
       setError('An error occurred during sign in');
@@ -89,6 +96,8 @@ export const Login = () => {
       const result = await setupPin(email, newPin);
       if (!result.success) {
         setError(result.error || 'Failed to setup PIN');
+      } else if (onLoginSuccess) {
+        onLoginSuccess();
       }
     } catch (err) {
       setError('An error occurred during PIN setup');
@@ -97,10 +106,38 @@ export const Login = () => {
     }
   };
 
+  const handleMockClick = (provider) => {
+    setError('');
+    setInfo(`${provider} login is not configured for this demo database. Please use "Login with Email" below.`);
+  };
+
+  if (activeView === 'register') {
+    return <Register onBackToLogin={() => setActiveView('options')} />;
+  }
+
   return (
     <div className="login-container">
       <div className="login-card">
-        <RotaryLogo className="login-logo rotary-wheel" />
+        {activeView === 'email' && !isSettingUpPin && (
+          <button 
+            type="button" 
+            className="login-back-btn"
+            onClick={() => {
+              setActiveView('options');
+              setError('');
+              setInfo('');
+            }}
+          >
+            <ArrowLeft size={16} />
+            <span>Back</span>
+          </button>
+        )}
+        <img 
+          src="https://rotarytrivandrumamity.com/wp-content/uploads/2024/03/rotary_amity_logo1.png" 
+          alt="Rotary Amity Logo" 
+          className="login-logo" 
+          style={{ width: '200px', height: 'auto', margin: '0 auto 24px', display: 'block', objectFit: 'contain' }} 
+        />
         
         <div className="login-header">
           <h1>Rotary Connect</h1>

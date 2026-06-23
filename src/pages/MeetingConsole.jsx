@@ -365,7 +365,7 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
           <div className="dashboard-grid">
             
             {/* Active Workspace Form Panel */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="dashboard-col" style={{ gap: '20px' }}>
               
               {/* Workspace Navigation Bar */}
               <div className="tab-container" style={{ margin: 0 }}>
@@ -606,7 +606,7 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
                       />
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div className="form-row-grid">
                       <div className="form-group">
                         <label className="form-label">Assign To *</label>
                         <select
@@ -802,11 +802,11 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
             </div>
 
             {/* Right Column: Active Feed of inputs */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="dashboard-col" style={{ gap: '20px' }}>
               
               {/* 1. Active Task Checklist (Review during meeting) */}
               <div className="card" style={{ padding: '20px' }}>
-                <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '8px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <CheckSquare size={16} style={{ color: 'var(--success)' }} />
                     Active Action Checklist

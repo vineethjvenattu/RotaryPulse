@@ -1,0 +1,33 @@
+<!-- Restore M001 -->
+<!DOCTYPE html>
+<html>
+<body>
+<pre id="log">Running...</pre>
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js';
+import { getFirestore, doc, updateDoc } from 'https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js';
+const app = initializeApp({
+  apiKey: "AIzaSyBpVt_4q2gp-0Ak06yP7ycez2O-f6_pnDs",
+  authDomain: "rotary-club-of-amity-tvm.firebaseapp.com",
+  projectId: "rotary-club-of-amity-tvm",
+  storageBucket: "rotary-club-of-amity-tvm.firebasestorage.app",
+  messagingSenderId: "962876194129",
+  appId: "1:962876194129:web:c06ce844d38654bfdf2770"
+});
+const db = getFirestore(app);
+const log = document.getElementById('log');
+async function run() {
+  try {
+    await updateDoc(doc(db, 'users', 'M001'), {
+      isSuperAdmin: false,
+      chapterId: "amity-tvm"
+    });
+    log.textContent = '✅ Arjun restored to amity-tvm.';
+  } catch(e) {
+    log.textContent = '❌ Error: ' + e.message;
+  }
+}
+run();
+</script>
+</body>
+</html>

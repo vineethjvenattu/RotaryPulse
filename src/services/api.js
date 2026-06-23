@@ -1,4 +1,39 @@
 // API Client for Rotary Connect (Google Sheets Backend or Local Mock Mode)
+import { db } from './firebase';
+import { collection, getDocs, getDoc, doc, setDoc, deleteDoc, updateDoc, query, where, writeBatch } from 'firebase/firestore';
+
+// Temporary helper to clean DB
+window.cleanMalformedMembers = async () => {
+  try {
+    console.log("Cleaning malformed members...");
+    const snapshot = await getDocs(collection(db, 'members'));
+    let deletedCount = 0;
+    
+    for (const d of snapshot.docs) {
+      const data = d.data();
+      const id = d.id;
+      const name = data.Name || data["Name (Rotary ID)"] || "";
+      
+      const isMalformed = 
+        !name ||
+        name === "" || 
+        name.includes("(") || 
+        id.startsWith("TMP-") ||
+        name.toLowerCase() === "unknown";
+
+      if (isMalformed) {
+        console.log(`Deleting malformed member: ID=${id}, Name=${name}`);
+        await deleteDoc(d.ref);
+        deletedCount++;
+      }
+    }
+    console.log(`Finished cleaning! Deleted ${deletedCount} malformed members.`);
+    alert(`Cleaned ${deletedCount} malformed members.`);
+  } catch (error) {
+    console.error("Error cleaning members:", error);
+    alert("Error: " + error.message);
+  }
+};
 
 const MOCK_MEMBERS = [
   {
@@ -284,6 +319,12 @@ function initLocalStorage() {
 initLocalStorage();
 
 // API Object exposing operations
+let activeChapterId = null;
+
+export const setApiChapterId = (id) => {
+  activeChapterId = id;
+};
+
 export const api = {
   isMock: IS_MOCK_MODE,
 
@@ -292,17 +333,42 @@ export const api = {
     if (IS_MOCK_MODE) {
       // Simulate network delay
       await new Promise(resolve => setTimeout(resolve, 600));
+
+      let membersList = [];
+      if (activeChapterId) {
+        try {
+          const snap = await Promise.race([
+            getDocs(collection(db, "chapters", activeChapterId, "members")),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase timeout")), 5000))
+          ]);
+          membersList = snap.docs.map(doc => {
+            const d = doc.data();
+            const { "Password/PIN": pin, ...rest } = d;
+            return { id: doc.id, ...rest, hasPin: !!pin || !!d.Pin };
+          });
+        } catch (err) {
+          console.error("Error fetching members from firebase:", err);
+        }
+      } 
+      
+      if (membersList.length === 0) {
+        membersList = JSON.parse(localStorage.getItem("rc_members") || "[]").map(m => {
+          const { ["Password/PIN"]: pin, ...rest } = m;
+          return { ...rest, hasPin: !!pin };
+        });
+      }
+
+      // Sort alphabetically by name
+      membersList.sort((a, b) => (a.Name || "").localeCompare(b.Name || ""));
+
       return {
         success: true,
         data: {
-          members: JSON.parse(localStorage.getItem("rc_members")).map(m => {
-            const { ["Password/PIN"]: pin, ...rest } = m;
-            return { ...rest, hasPin: !!pin };
-          }),
-          events: JSON.parse(localStorage.getItem("rc_events")),
-          attendance: JSON.parse(localStorage.getItem("rc_attendance")),
-          payments: JSON.parse(localStorage.getItem("rc_payments")),
-          announcements: JSON.parse(localStorage.getItem("rc_announcements"))
+          members: membersList,
+          events: JSON.parse(localStorage.getItem("rc_events") || "[]"),
+          attendance: JSON.parse(localStorage.getItem("rc_attendance") || "[]"),
+          payments: JSON.parse(localStorage.getItem("rc_payments") || "[]"),
+          announcements: JSON.parse(localStorage.getItem("rc_announcements") || "[]")
         }
       };
     } else {
@@ -315,71 +381,453 @@ export const api = {
     }
   },
 
+  listAllChapters: async () => {
+    try {
+      const snap = await getDocs(collection(db, "chapters"));
+      const chapters = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      return { success: true, chapters };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  createChapter: async (chapterId, name) => {
+    try {
+      await setDoc(doc(db, "chapters", chapterId), { name, status: "active", createdAt: new Date().toISOString() });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  getGlobalRoles: async () => {
+    try {
+      const docSnap = await getDoc(doc(db, "settings", "globalRoles"));
+      if (docSnap.exists()) {
+        return { success: true, roles: docSnap.data().roles || [] };
+      }
+      return { success: true, roles: ["President", "Secretary", "Treasurer"] }; // Defaults
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  saveGlobalRoles: async (roles) => {
+    try {
+      await setDoc(doc(db, "settings", "globalRoles"), { roles }, { merge: true });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  assignChapterRole: async (chapterId, memberId, roleName) => {
+    try {
+      const batch = writeBatch(db);
+
+      // 1. Find if someone in the chapter already has this role and demote them
+      const membersRef = collection(db, "chapters", chapterId, "members");
+      const qOldRole = query(membersRef, where("Role", "==", roleName));
+      const oldSnap = await getDocs(qOldRole);
+      
+      for (const oldDoc of oldSnap.docs) {
+        if (oldDoc.id !== memberId) {
+          batch.update(doc(db, "users", oldDoc.id), { Role: "Member" });
+          batch.update(doc(db, "chapters", chapterId, "members", oldDoc.id), { Role: "Member" });
+        }
+      }
+
+      // 2. Assign the new user to this role
+      if (memberId) {
+        batch.update(doc(db, "users", memberId), { Role: roleName, chapterId, status: "active" });
+        batch.set(doc(db, "chapters", chapterId, "members", memberId), { Role: roleName, chapterId, status: "active" }, { merge: true });
+      }
+
+      await batch.commit();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  registerMember: async (userData) => {
+    try {
+      const userId = Date.now().toString();
+      const ref = doc(db, "users", userId);
+      await setDoc(ref, { ...userData, "Member ID": userId, status: "pending", Role: "Member" });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  getPendingMembers: async () => {
+    try {
+      const q = query(collection(db, "users"), where("chapterId", "==", activeChapterId), where("status", "==", "pending"));
+      const snap = await getDocs(q);
+      return { success: true, pending: snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  approveMember: async (userId) => {
+    try {
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) return { success: false, error: "Not found" };
+      await updateDoc(userRef, { status: "active" });
+      await setDoc(doc(db, "chapters", activeChapterId, "members", userId), { ...userSnap.data(), status: "active" }, { merge: true });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  rejectMember: async (userId) => {
+    try {
+      await deleteDoc(doc(db, "users", userId));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  changeMemberRole: async (userId, newRole) => {
+    try {
+      if (["President", "Secretary", "Treasurer"].includes(newRole)) {
+        const snap = await getDocs(query(collection(db, "chapters", activeChapterId, "members"), where("Role", "==", newRole)));
+        for (const d of snap.docs) {
+          if (d.id !== userId) {
+            await updateDoc(doc(db, "users", d.id), { Role: "Member" });
+            await updateDoc(doc(db, "chapters", activeChapterId, "members", d.id), { Role: "Member" });
+          }
+        }
+      }
+      await updateDoc(doc(db, "users", userId), { Role: newRole });
+      await updateDoc(doc(db, "chapters", activeChapterId, "members", userId), { Role: newRole });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  proposeMemberDeletion: async (chapterId, userId, notes, initiatorRole, duesAction) => {
+    try {
+      const existingQuery = query(collection(db, "chapters", chapterId, "deletion_requests"), where("userId", "==", userId), where("status", "==", "pending"));
+      const existingSnap = await getDocs(existingQuery);
+      if (!existingSnap.empty) {
+        return { success: false, error: "A pending deletion request already exists for this member." };
+      }
+
+      const reqId = Date.now().toString();
+      const userSnap = await getDoc(doc(db, "users", userId));
+      
+      const paymentsRes = await api.getMemberPayments(userId);
+      const pendingDuesAmount = (paymentsRes.pending || []).reduce((sum, p) => sum + Number(p["Amount"] || 0), 0);
+
+      let pendingApprovals = ["President", "Secretary", "Treasurer"];
+      if (pendingApprovals.includes(initiatorRole)) {
+        pendingApprovals = pendingApprovals.filter(r => r !== initiatorRole);
+      }
+      const reqPayload = {
+        userId, 
+        userName: memberName, 
+        notes, 
+        duesAction: duesAction || "none",
+        pendingDuesAmount,
+        pendingApprovals, 
+        status: "pending", 
+        timestamp: reqId
+      };
+      await setDoc(doc(db, "chapters", chapterId, "deletion_requests", reqId), reqPayload);
+      await api.logActivity(chapterId, "Requested member deletion", `Requested deletion for ${memberName}`);
+      return { success: true, id: reqId };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  getDeletionRequests: async (chapterId) => {
+    try {
+      const snap = await getDocs(query(collection(db, "chapters", chapterId, "deletion_requests"), where("status", "==", "pending")));
+      return { success: true, requests: snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  rejectDeletionRequest: async (chapterId, requestId) => {
+    try {
+      const ref = doc(db, "chapters", chapterId, "deletion_requests", requestId);
+      await updateDoc(ref, { status: "rejected" });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  getMemberPayments: async (memberId) => {
+    try {
+      const payments = JSON.parse(localStorage.getItem("rc_payments") || "[]");
+      const pending = payments.filter(p => String(p["Member ID"]) === String(memberId) && p["Status"] !== "Paid" && p["Status"] !== "Waived");
+      return { success: true, pending };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  clearMemberPayments: async (memberId, action) => {
+    try {
+      const payments = JSON.parse(localStorage.getItem("rc_payments") || "[]");
+      let totalToWaive = 0;
+      let mName = "Unknown";
+      
+      payments.forEach(p => {
+        if (String(p["Member ID"]) === String(memberId) && p["Status"] !== "Paid" && p["Status"] !== "Waived") {
+          if (action === "cleared") {
+            p["Status"] = "Paid";
+            p["Paid Date"] = new Date().toISOString().split('T')[0];
+            p["Reference"] = "Cleared on removal";
+          } else if (action === "waiver_requested") {
+            totalToWaive += Number(p["Amount"] || 0);
+            mName = p["Member Name"] || "Unknown";
+            p["Status"] = "Paid";
+            p["Paid Date"] = new Date().toISOString().split('T')[0];
+            p["Reference"] = "Waived on removal";
+          }
+        }
+      });
+
+      if (action === "waiver_requested" && totalToWaive > 0) {
+        payments.push({
+          "Payment ID": `WAIVER-REV-${Date.now()}`,
+          "Member ID": memberId,
+          "Member Name": mName,
+          "Description": "Dues Waiver Reversal",
+          "Amount": -totalToWaive,
+          "Status": "Paid", 
+          "Date": new Date().toISOString().split('T')[0],
+          "Paid Date": new Date().toISOString().split('T')[0],
+          "Reference": "Reversal entry for waived dues on member removal",
+          "Event ID": ""
+        });
+      }
+
+      localStorage.setItem("rc_payments", JSON.stringify(payments));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  approveDeletionRequest: async (chapterId, requestId, approverRole) => {
+    try {
+      const ref = doc(db, "chapters", chapterId, "deletion_requests", requestId);
+      const snap = await getDoc(ref);
+      const data = snap.data();
+      let pendingApprovals = data.pendingApprovals || [];
+      let approvedBy = data.approvedBy || [];
+      
+      if (pendingApprovals.includes(approverRole)) {
+        pendingApprovals = pendingApprovals.filter(r => r !== approverRole);
+        if (!approvedBy.includes(approverRole)) approvedBy.push(approverRole);
+      }
+
+      if (pendingApprovals.length === 0) {
+        await updateDoc(doc(db, "users", data.userId), { 
+          chapterId: null, 
+          status: "orphaned", 
+          Role: "Member",
+          noDuesCertificateIssued: data.duesAction === 'cleared' || data.duesAction === 'waiver_requested' 
+        });
+        await deleteDoc(doc(db, "chapters", chapterId, "members", data.userId));
+        await updateDoc(ref, { pendingApprovals, approvedBy, status: "approved" });
+        
+        if (data.duesAction !== 'none') {
+          await api.clearMemberPayments(data.userId, data.duesAction);
+        }
+      } else {
+        await updateDoc(ref, { pendingApprovals, approvedBy });
+      }
+      
+      await api.logActivity(chapterId, "Approved member deletion", `Approved deletion for ${data.userName}`);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  logActivity: async (chapterId, action, details) => {
+    try {
+      await addDoc(collection(db, "chapters", chapterId, "activities"), {
+        action,
+        details,
+        timestamp: new Date().toISOString()
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  getActivities: async (chapterId) => {
+    try {
+      const q = query(collection(db, "chapters", chapterId, "activities"), orderBy("timestamp", "desc"), limit(50));
+      const snap = await getDocs(q);
+      return { success: true, activities: snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  inductMember: async (userId, targetChapterId) => {
+    try {
+      const userSnap = await getDoc(doc(db, "users", userId));
+      if (!userSnap.exists()) return { success: false, error: "Not found" };
+      const d = userSnap.data();
+      if (d.chapterId && d.chapterId !== targetChapterId && d.status === "active") return { success: false, error: "Already active in another chapter" };
+      await updateDoc(doc(db, "users", userId), { chapterId: targetChapterId, status: "active", Role: "Member" });
+      await setDoc(doc(db, "chapters", targetChapterId, "members", userId), { ...d, chapterId: targetChapterId, status: "active", Role: "Member" }, { merge: true });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  getChapterMembers: async (chapterId) => {
+    try {
+      const snap = await getDocs(collection(db, "chapters", chapterId, "members"));
+      const members = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      members.sort((a, b) => (a.Name || "").localeCompare(b.Name || ""));
+      return { success: true, members };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  getOrphanedMembers: async () => {
+    try {
+      const q = query(collection(db, "users"), where("status", "==", "orphaned"));
+      const snap = await getDocs(q);
+      const members = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      members.sort((a, b) => (a.Name || "").localeCompare(b.Name || ""));
+      return { success: true, members };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  bulkUploadMembers: async (chapterId, membersList) => {
+    try {
+      const batch = writeBatch(db);
+      const results = [];
+      let added = 0;
+
+      for (const member of membersList) {
+        const userId = member["Member ID"];
+        if (!userId) continue;
+
+        const userData = {
+          "Name": member.Name || "Unknown",
+          "Member ID": userId,
+          "Email": member.Email || `${userId}@rotary.org`,
+          "Role": "Member",
+          "Pin": "1234",
+          "chapterId": chapterId,
+          "status": "active"
+        };
+        
+        if (member.Gender) userData.Gender = member.Gender;
+        if (member.Mobile) userData.Mobile = member.Mobile;
+        if (member.Address) userData.Address = member.Address;
+        if (member.Profession) userData.Profession = member.Profession;
+        if (member["Spouse Name"]) userData["Spouse Name"] = member["Spouse Name"];
+        if (member.DOB) userData.DOB = member.DOB;
+
+        batch.set(doc(db, "users", userId), userData, { merge: true });
+        batch.set(doc(db, "chapters", chapterId, "members", userId), userData, { merge: true });
+
+        added++;
+        results.push(userData);
+      }
+
+      if (added > 0) await batch.commit();
+      return { success: true, count: added, members: results };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
   // Auth: Login
   login: async (email, pin) => {
-    if (IS_MOCK_MODE) {
-      await new Promise(resolve => setTimeout(resolve, 800));
-      const members = JSON.parse(localStorage.getItem("rc_members"));
-      const member = members.find(m => m["Email"].toLowerCase().trim() === email.toLowerCase().trim());
+    try {
+      // First check if it's the super admin
+      if (email.toLowerCase().trim() === "admin@rotary.org") {
+        if (String(pin).trim() === "0000") {
+          return {
+            success: true,
+            member: { Name: "Super Admin", Email: "admin@rotary.org", isSuperAdmin: true, Role: "Super Admin" }
+          };
+        } else {
+          return { success: false, error: "Incorrect PIN" };
+        }
+      }
+
+      const q = query(collection(db, "users"), where("Email", "==", email.toLowerCase().trim()));
+      const snap = await getDocs(q);
       
-      if (!member) {
+      if (snap.empty) {
         return { success: false, error: "Member email not found" };
       }
       
-      const savedPin = String(member["Password/PIN"]).trim();
+      const userDoc = snap.docs[0];
+      const userData = userDoc.data();
+      
+      const savedPin = String(userData.Pin || userData["Password/PIN"] || "").trim();
+      
       if (savedPin === "") {
-        return { success: true, needsPinSetup: true, email: member["Email"] };
+        return { success: true, needsPinSetup: true, email: userData.Email };
       }
       
       if (savedPin === String(pin).trim()) {
-        const { ["Password/PIN"]: p, ...sanitized } = member;
-        return { success: true, member: sanitized };
+        const { Pin, "Password/PIN": p, ...sanitized } = userData;
+        return { success: true, member: { id: userDoc.id, ...sanitized } };
       } else {
         return { success: false, error: "Incorrect PIN" };
       }
-    } else {
-      try {
-        const response = await fetch(APPS_SCRIPT_URL, {
-          method: "POST",
-          body: JSON.stringify({ action: "login", email, pin })
-        });
-        return await response.json();
-      } catch (err) {
-        return { success: false, error: err.toString() };
-      }
+    } catch (err) {
+      return { success: false, error: err.toString() };
     }
   },
 
   // Auth: Set initial PIN
   setPin: async (email, pin) => {
-    if (IS_MOCK_MODE) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const members = JSON.parse(localStorage.getItem("rc_members"));
-      const memberIndex = members.findIndex(m => m["Email"].toLowerCase().trim() === email.toLowerCase().trim());
+    try {
+      const q = query(collection(db, "users"), where("Email", "==", email.toLowerCase().trim()));
+      const snap = await getDocs(q);
       
-      if (memberIndex === -1) {
+      if (snap.empty) {
         return { success: false, error: "Member email not found" };
       }
       
-      if (String(members[memberIndex]["Password/PIN"]).trim() !== "") {
+      const userDoc = snap.docs[0];
+      const userData = userDoc.data();
+      
+      const savedPin = String(userData.Pin || userData["Password/PIN"] || "").trim();
+      if (savedPin !== "") {
         return { success: false, error: "PIN is already setup. Contact Admin." };
       }
       
-      members[memberIndex]["Password/PIN"] = String(pin).trim();
-      localStorage.setItem("rc_members", JSON.stringify(members));
-      
-      const { ["Password/PIN"]: p, ...sanitized } = members[memberIndex];
-      return { success: true, member: sanitized };
-    } else {
-      try {
-        const response = await fetch(APPS_SCRIPT_URL, {
-          method: "POST",
-          body: JSON.stringify({ action: "set_pin", email, pin })
-        });
-        return await response.json();
-      } catch (err) {
-        return { success: false, error: err.toString() };
+      await updateDoc(doc(db, "users", userDoc.id), { Pin: String(pin).trim() });
+      if (userData.chapterId) {
+        await updateDoc(doc(db, "chapters", userData.chapterId, "members", userDoc.id), { Pin: String(pin).trim() });
       }
+      
+      const { Pin, "Password/PIN": p, ...sanitized } = userData;
+      return { success: true, member: { id: userDoc.id, ...sanitized } };
+    } catch (err) {
+      return { success: false, error: err.toString() };
     }
   },
 
@@ -488,10 +936,40 @@ export const api = {
     }
   },
 
+  createReceivables: async (membersToCharge, category, amount, description, dueDate, eventId) => {
+    try {
+      const payments = JSON.parse(localStorage.getItem("rc_payments") || "[]");
+      
+      const newPayments = membersToCharge.map(member => {
+        return {
+          "Payment ID": `P${Date.now()}${Math.floor(Math.random() * 1000)}`,
+          "Member ID": member["Member ID"] || member.id,
+          "Member Name": member["Name"],
+          "Amount": amount,
+          "Description": description,
+          "Category": category || "Fee",
+          "Status": "Pending",
+          "Due Date": dueDate,
+          "Paid Date": "",
+          "Reference": "",
+          "Event ID": eventId || "",
+          "Notes": ""
+        };
+      });
+
+      const updatedPayments = [...payments, ...newPayments];
+      localStorage.setItem("rc_payments", JSON.stringify(updatedPayments));
+      
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
   // Make Payment (Simulated)
-  makePayment: async (paymentId, reference) => {
+  submitPaymentReference: async (paymentId, reference) => {
     if (IS_MOCK_MODE) {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate bank processing
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate processing
       const payments = JSON.parse(localStorage.getItem("rc_payments"));
       const index = payments.findIndex(p => p["Payment ID"] === paymentId);
       
@@ -499,9 +977,7 @@ export const api = {
         return { success: false, error: "Payment record not found" };
       }
       
-      const today = new Date().toISOString().split('T')[0];
-      payments[index]["Status"] = "Paid";
-      payments[index]["Paid Date"] = today;
+      payments[index]["Status"] = "Verification Pending";
       payments[index]["Reference"] = reference;
       
       localStorage.setItem("rc_payments", JSON.stringify(payments));
@@ -516,6 +992,58 @@ export const api = {
       } catch (err) {
         return { success: false, error: err.toString() };
       }
+    }
+  },
+
+  verifyPayment: async (paymentId) => {
+    if (IS_MOCK_MODE) {
+      const payments = JSON.parse(localStorage.getItem("rc_payments"));
+      const index = payments.findIndex(p => p["Payment ID"] === paymentId);
+      if (index > -1) {
+        payments[index]["Status"] = "Paid";
+        payments[index]["Paid Date"] = new Date().toISOString().split('T')[0];
+        localStorage.setItem("rc_payments", JSON.stringify(payments));
+      }
+      return { success: true };
+    }
+  },
+
+  rejectPaymentVerification: async (paymentId) => {
+    if (IS_MOCK_MODE) {
+      const payments = JSON.parse(localStorage.getItem("rc_payments"));
+      const index = payments.findIndex(p => p["Payment ID"] === paymentId);
+      if (index > -1) {
+        payments[index]["Status"] = "Pending";
+        payments[index]["Reference"] = "";
+        localStorage.setItem("rc_payments", JSON.stringify(payments));
+      }
+      return { success: true };
+    }
+  },
+
+  logActivity: async (chapterId, title, description) => {
+    const auth = getAuth();
+    if (!auth.currentUser) return;
+    try {
+      await addDoc(collection(db, "chapters", chapterId, "activities"), {
+        userId: auth.currentUser.uid,
+        title,
+        description,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) { console.error("Error logging activity:", e); }
+  },
+
+  getMyActivities: async (chapterId, userId) => {
+    try {
+      const q = query(collection(db, "chapters", chapterId, "activities"), where("userId", "==", userId));
+      const snap = await getDocs(q);
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+      return list;
+    } catch (e) {
+      console.error("Error getting activities:", e);
+      return [];
     }
   }
 };
