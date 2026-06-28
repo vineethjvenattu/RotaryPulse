@@ -95,12 +95,60 @@ function AppContent() {
 
   useEffect(() => {
     sessionStorage.setItem('rc_active_tab', activeTab);
-    // Keep URL in sync and clear any stale pathnames (like /login)
-    const newUrl = `${window.location.origin}/?page=${activeTab}`;
-    if (window.location.href !== newUrl) {
-      window.history.replaceState({}, '', newUrl);
-    }
   }, [activeTab]);
+
+  useEffect(() => {
+    let isMounted = true;
+    let unsubscribe = null;
+    
+    // Listen for foreground push notifications
+    import('./services/firebase').then(({ messaging }) => {
+      if (messaging && isMounted) {
+        import('firebase/messaging').then(({ onMessage }) => {
+          if (isMounted) {
+            unsubscribe = onMessage(messaging, (payload) => {
+              console.log('Foreground push received:', payload);
+              if ((payload.notification || payload.data) && Notification.permission === 'granted') {
+                const title = payload.notification?.title || payload.data?.title || "New Notification";
+                const body = payload.notification?.body || payload.data?.body || "";
+                
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.ready.then(registration => {
+                    registration.showNotification(title, {
+                      body: body,
+                      icon: '/rotary-logo.png',
+                      data: { url: payload.data?.url }
+                    });
+                  });
+                } else {
+                  const notification = new Notification(title, {
+                    body: body,
+                    icon: '/rotary-logo.png'
+                  });
+                  notification.onclick = () => {
+                    notification.close();
+                    const url = payload.data?.url;
+                    if (url) {
+                      const urlParams = new URLSearchParams(url.split('?')[1]);
+                      const page = urlParams.get('page');
+                      if (page) setActiveTab(page);
+                    }
+                  };
+                }
+              }
+            });
+          }
+        });
+      }
+    }).catch(err => console.error("Error setting up foreground messaging:", err));
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, []);
 
   const [data, setData] = useState({
     members: [],

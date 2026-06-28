@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Mail, Lock, Key, AlertCircle, Phone, ArrowLeft } from 'lucide-react';
 import { Register } from './Register';
+import { api } from '../services/api';
 import logoImg from '../assets/rotary-logo.png';
 import './pages.css';
 
 export const Login = ({ onLoginSuccess }) => {
   const { login, setupPin } = useAuth();
-  const [email, setEmail] = useState('');
+  const [memberId, setMemberId] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -19,17 +20,55 @@ export const Login = ({ onLoginSuccess }) => {
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
 
-  const params = new URLSearchParams(window.location.search);
-  const isDevMode = params.get('devCode') === 'amity2026';
+  // Captcha state
+  const [num1, setNum1] = useState(0);
+  const [num2, setNum2] = useState(0);
+  const [captchaInput, setCaptchaInput] = useState('');
+  const [captchaError, setCaptchaError] = useState(false);
 
-  const handleQuickLogin = async (emailVal, pinVal) => {
+  useEffect(() => {
+    generateCaptcha();
+  }, []);
+
+  const generateCaptcha = () => {
+    setNum1(Math.floor(Math.random() * 10) + 1);
+    setNum2(Math.floor(Math.random() * 10) + 1);
+    setCaptchaInput('');
+    setCaptchaError(false);
+  };
+
+  const params = new URLSearchParams(window.location.search);
+  const rawDevCode = params.get('devCode');
+  const [isDevMode, setIsDevMode] = useState(false);
+  const [devUsers, setDevUsers] = useState([]);
+
+  useEffect(() => {
+    const checkDevMode = async () => {
+      console.log("Checking dev mode with rawDevCode:", rawDevCode);
+      if (rawDevCode) {
+        const res = await api.validateDevCode(rawDevCode);
+        console.log("validateDevCode result:", res);
+        if (res.success) {
+          setIsDevMode(true);
+          const usersRes = await api.getAllUsersForDev();
+          console.log("getAllUsersForDev result:", usersRes);
+          if (usersRes.success) setDevUsers(usersRes.users);
+        } else {
+          console.warn("Dev mode invalid:", res.error);
+        }
+      }
+    };
+    checkDevMode();
+  }, [rawDevCode]);
+
+  const handleQuickLogin = async (memberIdVal, pinVal) => {
     setError('');
     setLoading(true);
     try {
-      const result = await login(emailVal, pinVal);
+      const result = await login(memberIdVal, pinVal);
       if (!result.success) {
         if (result.needsPinSetup) {
-          setEmail(emailVal);
+          setMemberId(memberIdVal);
           setIsSettingUpPin(true);
         } else {
           setError(result.error || 'Authentication failed');
@@ -46,8 +85,15 @@ export const Login = ({ onLoginSuccess }) => {
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!email || !pin) {
+    if (!memberId || !pin) {
       setError('Please fill in all fields');
+      return;
+    }
+    
+    if (parseInt(captchaInput) !== num1 + num2) {
+      setCaptchaError(true);
+      setError('Incorrect Captcha. Please try again.');
+      generateCaptcha();
       return;
     }
     
@@ -55,7 +101,7 @@ export const Login = ({ onLoginSuccess }) => {
     setLoading(true);
     
     try {
-      const result = await login(email, pin);
+      const result = await login(memberId, pin);
       if (!result.success) {
         if (result.needsPinSetup) {
           setIsSettingUpPin(true);
@@ -93,7 +139,7 @@ export const Login = ({ onLoginSuccess }) => {
     setLoading(true);
 
     try {
-      const result = await setupPin(email, newPin);
+      const result = await setupPin(memberId, newPin);
       if (!result.success) {
         setError(result.error || 'Failed to setup PIN');
       } else if (onLoginSuccess) {
@@ -108,7 +154,7 @@ export const Login = ({ onLoginSuccess }) => {
 
   const handleMockClick = (provider) => {
     setError('');
-    setInfo(`${provider} login is not configured for this demo database. Please use "Login with Email" below.`);
+    setInfo(`${provider} login is not configured for this demo database. Please use "Login with Member ID" below.`);
   };
 
   if (activeView === 'register') {
@@ -118,7 +164,7 @@ export const Login = ({ onLoginSuccess }) => {
   return (
     <div className="login-container">
       <div className="login-card">
-        {activeView === 'email' && !isSettingUpPin && (
+        {activeView === 'memberId' && !isSettingUpPin && (
           <button 
             type="button" 
             className="login-back-btn"
@@ -155,20 +201,20 @@ export const Login = ({ onLoginSuccess }) => {
           <>
             <form onSubmit={handleLoginSubmit} className="animate-fade-in">
               <div className="form-group" style={{ textAlign: 'left' }}>
-                <label className="form-label" htmlFor="email">Email Address</label>
+                <label className="form-label" htmlFor="email">Member ID</label>
                 <div style={{ position: 'relative' }}>
                   <Mail 
                     size={18} 
                     style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} 
                   />
                   <input
-                    id="email"
-                    type="email"
+                    id="memberId"
+                    type="text"
                     className="form-control"
                     style={{ paddingLeft: '44px' }}
                     placeholder="name@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    value={memberId}
+                    onChange={(e) => setMemberId(e.target.value)}
                     disabled={loading}
                   />
                 </div>
@@ -195,6 +241,24 @@ export const Login = ({ onLoginSuccess }) => {
                 </div>
               </div>
 
+              {/* Captcha */}
+              <div className="form-group" style={{ textAlign: 'left', marginTop: '15px' }}>
+                <label className="form-label" htmlFor="captcha">Security Check: What is {num1} + {num2}?</label>
+                <input
+                  id="captcha"
+                  type="text"
+                  className={`form-control ${captchaError ? 'error-border' : ''}`}
+                  placeholder="Enter answer"
+                  value={captchaInput}
+                  onChange={(e) => {
+                    setCaptchaInput(e.target.value);
+                    setCaptchaError(false);
+                  }}
+                  disabled={loading}
+                  style={captchaError ? { borderColor: 'var(--error)' } : {}}
+                />
+              </div>
+
               <button 
                 type="submit" 
                 className="btn btn-primary" 
@@ -210,43 +274,28 @@ export const Login = ({ onLoginSuccess }) => {
                 <h4 style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '12px', fontWeight: 600, letterSpacing: '0.5px' }}>
                   🛠️ Developer Quick Bypass
                 </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ fontSize: '11px', padding: '8px 4px', fontWeight: 600 }}
-                    onClick={() => handleQuickLogin('arjun.mehta@email.com', '1234')}
-                    disabled={loading}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <select 
+                    className="form-control" 
+                    onChange={(e) => {
+                      const selectedUser = devUsers.find(u => u["Member ID"] === e.target.value);
+                      if (selectedUser) {
+                        setMemberId(selectedUser["Member ID"]);
+                        setPin(selectedUser.Pin || selectedUser["Password/PIN"] || '');
+                      } else {
+                        setMemberId('');
+                        setPin('');
+                      }
+                    }}
+                    defaultValue=""
                   >
-                    President (Arjun)
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ fontSize: '11px', padding: '8px 4px', fontWeight: 600 }}
-                    onClick={() => handleQuickLogin('neha@email.com', '1111')}
-                    disabled={loading}
-                  >
-                    Secretary (Neha)
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ fontSize: '11px', padding: '8px 4px', fontWeight: 600 }}
-                    onClick={() => handleQuickLogin('sanjay@email.com', '2222')}
-                    disabled={loading}
-                  >
-                    Treasurer (Sanjay)
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ fontSize: '11px', padding: '8px 4px', fontWeight: 600 }}
-                    onClick={() => handleQuickLogin('priya@email.com', '3333')}
-                    disabled={loading}
-                  >
-                    Member (Priya)
-                  </button>
+                    <option value="" disabled>Select a user to bypass login...</option>
+                    {devUsers.map(u => (
+                      <option key={u.id || u.Email} value={u["Member ID"]}>
+                        {u.Name} ({u.Role || 'User'})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             )}

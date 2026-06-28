@@ -1,5 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
+import { getMessaging } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -15,14 +17,22 @@ const hasConfig = !!import.meta.env.VITE_FIREBASE_PROJECT_ID;
 
 let app = null;
 let db = null;
+let storage = null;
+let messaging = null;
 
 if (hasConfig) {
   try {
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
+    storage = getStorage(app);
+    
+    // Initialize Messaging if supported in the browser
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      messaging = getMessaging(app);
+    }
   } catch (error) {
     console.error("Failed to initialize Firebase:", error);
   }
 }
 
-export { db, hasConfig };
+export { app, db, storage, messaging, hasConfig };

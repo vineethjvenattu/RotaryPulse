@@ -26,6 +26,7 @@ The application supports four primary user roles, each with distinct permissions
 | **Approve Payment Edits** | None | 2-of-3 Auth | 2-of-3 Auth | 2-of-3 Auth |
 | **Meeting Minutes** | View | Create/Edit | View | Create/Edit |
 | **Tasks & Project Notes** | View Own | Create/Edit | Create/Edit | Create/Edit |
+| **User Feedbacks** | Create | View/Acknowledge | View/Acknowledge | View/Acknowledge |
 
 > **Note on Committee**: The President, Secretary, and Treasurer form the core Committee.
 
@@ -44,11 +45,11 @@ The application supports four primary user roles, each with distinct permissions
 - **Top Bar**: Rotary wheel logo contextually hidden when deep-linked on mobile to allow back navigation.
 
 ### 3.3. Member Directory
-- **Listing View**: Alphabetical list of members displaying photo, name (with proper Rotarian Salutations like Rtn. or Rtn. Mrs.), role, and phone number.
+- **Listing View**: Alphabetical list of members displaying profile image (or initials if none), name (with proper Rotarian Salutations like Rtn. or Rtn. Mrs.), role, and phone number. Profile images are globally updated across all views.
 - **Search**: Real-time search by name.
 - **Profile Detail View**:
   - Full-screen drawer layout on mobile.
-  - Profile attributes: Classification, Blood Group, Birthday, Wedding Anniversary.
+  - Profile attributes: Classification, Blood Group, Birthday, Wedding Anniversary, Profile Image Upload.
 
 ### 3.4. Events & Meetings
 - **Tabbed View**: Categorized into *Upcoming* and *Past* events.
@@ -59,6 +60,7 @@ The application supports four primary user roles, each with distinct permissions
 - **Event Selection**: List of events requiring attendance registration.
 - **Quick Search**: Search bar to quickly locate members.
 - **Status Toggles**: Mobile-optimized, inline toggles for Present/Absent.
+- **QR Code Check-in**: Generates a dynamic QR code for an event. Members can scan it using their mobile device to self-check-in, which directly updates the central Firebase database. Duplicate check-ins are prevented.
 - **Summary Header**: Responsive 3-column statistics for Present, Absent, and Total strength.
 
 ### 3.6. Payments, Dues & Committee Approvals
@@ -73,6 +75,12 @@ The application supports four primary user roles, each with distinct permissions
 
 ### 3.7. Announcements (Notice Board)
 - **Notice Feed**: Feed of official announcements ordered chronologically.
+
+### 3.8. Feedback Management
+- **Feedback Widget**: Floating widget accessible across the app for members to submit feedback (bug reports, feature requests, general).
+- **Admin Feedback Menu**: Dedicated menu for the Core Committee to review submitted feedbacks.
+- **Notification System**: Global bell icon displaying a notification badge for the count of *unacknowledged* feedbacks.
+- **Acknowledge Workflow**: Core committee members can click "Acknowledge" to mark a feedback as seen, clearing the notification badge.
 
 ---
 
@@ -106,5 +114,8 @@ The application utilizes Google Firebase for robust, real-time data management:
 ### 5.5. `payment_edits`
 - `Edit ID` (string, PK), `Payment ID`, `Status` (pending/approved/rejected/cancelled), `Proposed By`, `Required Approvers` (array), `Approvals` (array), `Rejections` (array), `Changes` (map), `Original` (map)
 
-### 5.6. Other Collections
+### 5.6. `feedbacks`
+- `id` (string, PK), `userId`, `userName`, `type`, `message`, `timestamp`, `acknowledged` (boolean)
+
+### 5.7. Other Collections
 - `announcements`, `tasks`, `projectNotes`, `minutes`, `opinions`

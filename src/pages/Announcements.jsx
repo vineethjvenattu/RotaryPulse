@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Bell, Plus, X, User } from 'lucide-react';
@@ -105,8 +106,8 @@ export const Announcements = ({ data, loading, refreshData }) => {
       )}
 
       {/* POST ANNOUNCEMENT MODAL OVERLAY */}
-      {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+      {showAddModal && createPortal(
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)} style={{ zIndex: 1000 }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="drawer-close" onClick={() => setShowAddModal(false)}>
               <X size={24} />
@@ -158,7 +159,8 @@ export const Announcements = ({ data, loading, refreshData }) => {
               </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

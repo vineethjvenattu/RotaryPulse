@@ -1,41 +1,68 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api, setApiChapterId } from '../services/api';
+import { messaging } from '../services/firebase';
+import { getToken } from 'firebase/messaging';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
+  const [globalConfig, setGlobalConfig] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Check for cached user session on mount
   // Use sessionStorage (per-tab) first, fall back to localStorage for single-tab persistence
   useEffect(() => {
-    const sessionUser = sessionStorage.getItem("rc_user_session");
-    const cachedUser = sessionUser || localStorage.getItem("rc_user_session");
-    if (cachedUser) {
-      const parsed = JSON.parse(cachedUser);
-      setCurrentUser(parsed);
-      setApiChapterId(parsed.chapterId);
-      // Ensure sessionStorage has the value for this tab
-      sessionStorage.setItem("rc_user_session", JSON.stringify(parsed));
-    }
-    setLoading(false);
+    const init = async () => {
+      // Fetch global config
+      const confRes = await api.getGlobalConfig();
+      if (confRes.success) {
+        setGlobalConfig(confRes.config);
+      }
+
+      const sessionUser = sessionStorage.getItem("rc_user_session");
+      const cachedUser = sessionUser || localStorage.getItem("rc_user_session");
+      if (cachedUser) {
+        const parsed = JSON.parse(cachedUser);
+        setCurrentUser(parsed);
+        setApiChapterId(parsed.chapterId);
+        // Ensure sessionStorage has the value for this tab
+        sessionStorage.setItem("rc_user_session", JSON.stringify(parsed));
+      }
+      setLoading(false);
+    };
+    init();
   }, []);
 
-  const login = async (email, pin) => {
-    const result = await api.login(email, pin);
+  const login = async (memberId, pin) => {
+    const result = await api.login(memberId, pin);
     if (result.success && result.member) {
       setCurrentUser(result.member);
       setApiChapterId(result.member.chapterId);
       // Store in both: sessionStorage for this tab, localStorage for cross-refresh persistence
       sessionStorage.setItem("rc_user_session", JSON.stringify(result.member));
       localStorage.setItem("rc_user_session", JSON.stringify(result.member));
+      
+      // Request Push Notification Permissions
+      if (messaging) {
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission === 'granted') {
+            const token = await getToken(messaging);
+            if (token) {
+              await api.saveFcmToken(result.member.id, token);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to get FCM token', e);
+        }
+      }
     }
     return result;
   };
 
-  const setupPin = async (email, pin) => {
-    const result = await api.setPin(email, pin);
+  const setupPin = async (memberId, pin) => {
+    const result = await api.setPin(memberId, pin);
     if (result.success && result.member) {
       setCurrentUser(result.member);
       setApiChapterId(result.member.chapterId);
@@ -61,8 +88,12 @@ export const AuthProvider = ({ children }) => {
   const canMarkAttendance = isPresident || isSecretary;
   const canManagePayments = isPresident || isTreasurer;
 
+  const isSuperAdmin = currentUser?.isSuperAdmin || (globalConfig?.superAdminEmails || []).includes(currentUser?.Email);
+  const enrichedUser = currentUser ? { ...currentUser, isSuperAdmin } : null;
+
   const value = {
-    currentUser,
+    currentUser: enrichedUser,
+    globalConfig,
     loading,
     login,
     setupPin,

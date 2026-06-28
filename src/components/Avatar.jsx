@@ -3,10 +3,11 @@ import React from 'react';
 export const Avatar = ({ member, size = 40, className = '', style = {} }) => {
   if (!member) return null;
   
-  if (member.Image) {
+  const imageUrl = member.avatarUrl || member.photoURL || member.Image;
+  if (imageUrl) {
     return (
       <img 
-        src={member.Image} 
+        src={imageUrl} 
         alt={member.Name || "Member"} 
         className={`avatar-img ${className}`}
         style={{ width: `var(--avatar-size, ${size}px)`, height: `var(--avatar-size, ${size}px)`, borderRadius: '50%', objectFit: 'cover', ...style }} 

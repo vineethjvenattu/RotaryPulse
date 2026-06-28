@@ -82,7 +82,7 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
   // Load minutes if already exist
   useEffect(() => {
     if (selectedEventId) {
-      const minutesRecord = data.minutes.find(m => m["Event ID"] === selectedEventId);
+      const minutesRecord = data.minutes?.find(m => m["Event ID"] === selectedEventId);
       setMinutesText(minutesRecord ? minutesRecord["Notes"] : '');
       setMinutesSuccess(false);
       setPaymentSuccess(false);
@@ -350,6 +350,7 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
               className="form-control"
               value={selectedEventId}
               onChange={(e) => setSelectedEventId(e.target.value)}
+              style={{ fontSize: '13px', padding: '8px 12px' }}
             >
               <option value="">-- Choose Meeting --</option>
               {events.filter(e => e["Type"] === "Meeting").map((e) => (

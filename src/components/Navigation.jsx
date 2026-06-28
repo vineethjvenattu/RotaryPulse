@@ -16,7 +16,8 @@ import {
   ArrowLeft,
   MoreHorizontal,
   Upload,
-  Image
+  Image,
+  MessageSquare
 } from 'lucide-react';
 import { Avatar } from '../components/Avatar';
 import './Navigation.css';
@@ -66,7 +67,7 @@ export const RotaryLogo = ({ className }) => (
 );
 
 export const Navigation = ({ activeTab, setActiveTab, data }) => {
-  const { currentUser, logout, canMarkAttendance, isTreasurer, isPresident } = useAuth();
+  const { currentUser, globalConfig, logout, canMarkAttendance, isTreasurer, isPresident } = useAuth();
   const [showMobileMore, setShowMobileMore] = useState(false);
   const [uploadingCSV, setUploadingCSV] = useState(false);
   const fileInputRef = useRef(null);
@@ -145,7 +146,7 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
   // Compute pending approvals count for this user
   const myApprovalCount = React.useMemo(() => {
     if (!currentUser || !data?.paymentEdits) return 0;
-    const COMMITTEE_ROLES = ['President', 'Secretary', 'Treasurer'];
+    const COMMITTEE_ROLES = globalConfig?.coreCommitteeRoles || ['President', 'Secretary', 'Treasurer'];
     if (!COMMITTEE_ROLES.includes(currentUser["Role"])) return 0;
     return data.paymentEdits.filter(e =>
       e["Status"] === "pending" &&
@@ -154,9 +155,16 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
     ).length;
   }, [data?.paymentEdits, currentUser]);
 
+  const unacknowledgedFeedbackCount = React.useMemo(() => {
+    if (!currentUser || !data?.feedbacks) return 0;
+    const COMMITTEE_ROLES = globalConfig?.coreCommitteeRoles || ['President', 'Secretary', 'Treasurer'];
+    if (!COMMITTEE_ROLES.includes(currentUser["Role"]) && !currentUser.isSuperAdmin) return 0;
+    return data.feedbacks.filter(f => !f.acknowledged).length;
+  }, [data?.feedbacks, currentUser, globalConfig]);
+
   const navItems = currentUser?.isSuperAdmin ? [
     { id: 'dashboard', label: 'Chapters', icon: Home, visible: true },
-    { id: 'profile', label: 'My Profile', icon: User, visible: true }
+    { id: 'profile', label: 'My Profile', icon: User, visible: !!currentUser["Rotary ID"] }
   ] : [
     { id: 'dashboard', label: 'Home', icon: Home, visible: true },
     { id: 'members', label: 'Members', icon: Users, visible: true },
@@ -164,6 +172,7 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
     { id: 'attendance', label: 'Attendance', icon: CheckSquare, visible: canMarkAttendance },
     { id: 'payments', label: 'Payments', icon: CreditCard, visible: true },
     { id: 'announcements', label: 'Announcements', icon: Bell, visible: true },
+    { id: 'feedbacks', label: 'User Feedbacks', icon: MessageSquare, visible: currentUser?.isSuperAdmin || (globalConfig?.coreCommitteeRoles || ['President', 'Secretary', 'Treasurer']).includes(currentUser?.["Role"]) },
     { id: 'gallery', label: 'Gallery', icon: Image, visible: true },
     { id: 'profile', label: 'My Profile', icon: User, visible: true }
   ];
@@ -235,6 +244,9 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
                   {showBadge && (
                     <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>{myApprovalCount}</span>
                   )}
+                  {item.id === 'feedbacks' && unacknowledgedFeedbackCount > 0 && (
+                    <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>{unacknowledgedFeedbackCount}</span>
+                  )}
                 </span>
                 {item.label}
               </button>
@@ -288,12 +300,18 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
 
         <div className="mobile-header-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button 
-            onClick={() => setActiveTab('announcements')} 
+            onClick={() => {
+              if (unacknowledgedFeedbackCount > 0) setActiveTab('feedbacks');
+              else setActiveTab('announcements');
+            }} 
             className="header-bell-btn"
             title="Notices"
-            style={{ background: 'none', border: 'none', padding: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            style={{ position: 'relative', background: 'none', border: 'none', padding: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
           >
             <Bell size={24} color="white" />
+            {unacknowledgedFeedbackCount > 0 && (
+              <span style={{ position: 'absolute', top: 4, right: 4, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>{unacknowledgedFeedbackCount}</span>
+            )}
           </button>
           {(activeTab !== 'dashboard' || scrolled) && currentUser && (
             <button 
@@ -324,13 +342,15 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
           );
         })}
         
-        <button
-          onClick={handleMobileMoreClick}
-          className={`mobile-nav-item ${showMobileMore || ['attendance', 'payments', 'announcements', 'profile'].includes(activeTab) ? 'active' : ''}`}
-        >
-          {showMobileMore ? <X size={22} /> : <Menu size={22} />}
-          More
-        </button>
+        {navItems.filter(item => item.visible && !mobileCoreTabs.map(t => t.id).includes(item.id)).length > 0 && (
+          <button
+            onClick={handleMobileMoreClick}
+            className={`mobile-nav-item ${showMobileMore || ['attendance', 'payments', 'announcements', 'profile'].includes(activeTab) ? 'active' : ''}`}
+          >
+            {showMobileMore ? <X size={22} /> : <Menu size={22} />}
+            More
+          </button>
+        )}
       </nav>
 
       {/* MOBILE "MORE" POPUP MENU */}
@@ -355,6 +375,9 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
                       <Icon size={18} />
                       {showBadge && (
                         <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{myApprovalCount}</span>
+                      )}
+                      {item.id === 'feedbacks' && unacknowledgedFeedbackCount > 0 && (
+                        <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{unacknowledgedFeedbackCount}</span>
                       )}
                     </span>
                     {item.label}

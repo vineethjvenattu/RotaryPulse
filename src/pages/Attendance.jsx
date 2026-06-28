@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Avatar } from '../components/Avatar';
@@ -21,9 +22,10 @@ export const Attendance = ({ data, loading, refreshData }) => {
   // Initialize selected event
   useEffect(() => {
     if (events.length > 0 && !selectedEventId) {
-      // Find closest event
+      // Find event matching exactly today's date, or fallback to the closest upcoming
       const todayStr = new Date().toISOString().split('T')[0];
-      const closest = events.find(e => e["Date"] >= todayStr) || events[0];
+      const todayEvent = events.find(e => e["Date"] === todayStr);
+      const closest = todayEvent || events.find(e => e["Date"] >= todayStr) || events[0];
       setSelectedEventId(closest["Event ID"]);
     }
   }, [events, selectedEventId]);
@@ -139,34 +141,50 @@ export const Attendance = ({ data, loading, refreshData }) => {
         
         {/* Event Selector Card */}
         <div className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="form-group" style={{ margin: 0, flex: 1, minWidth: '200px' }}>
-              <label className="form-label">Select Meeting or Service Event</label>
-              <select
-                className="form-control"
-                value={selectedEventId}
-                onChange={(e) => setSelectedEventId(e.target.value)}
-              >
-                <option value="">-- Choose Event --</option>
-                {events.map((e) => (
-                  <option key={e["Event ID"]} value={e["Event ID"]}>
-                    {e["Event Name"]} ({e["Date"]})
-                  </option>
-                ))}
-              </select>
-            </div>
-            {selectedEventId && (
-              <button
-                type="button"
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h2 style={{ fontSize: '16px', margin: 0 }}>Select Event</h2>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
                 className="btn btn-secondary"
-                style={{ height: '46px', display: 'flex', alignItems: 'center', gap: '8px' }}
-                onClick={() => setShowQrModal(true)}
+                onClick={refreshData}
+                title="Refresh Attendance Data"
+                style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
               >
-                <QrCode size={18} />
-                Generate QR Code
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                  <path d="M16 21v-5h5" />
+                </svg>
+                Refresh
               </button>
-            )}
+              {selectedEventId && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                  onClick={() => setShowQrModal(true)}
+                >
+                  <QrCode size={18} />
+                  QR Code
+                </button>
+              )}
+            </div>
           </div>
+          
+          <select
+            className="form-control"
+            value={selectedEventId}
+            onChange={(e) => setSelectedEventId(e.target.value)}
+            style={{ fontSize: '13px', padding: '8px 12px' }}
+          >
+            <option value="">-- Choose Event --</option>
+            {events.map((e) => (
+              <option key={e["Event ID"]} value={e["Event ID"]}>
+                {e["Event Name"] || e["Title"]} ({e["Date"]})
+              </option>
+            ))}
+          </select>
         </div>
 
         {selectedEventId && (
@@ -261,7 +279,7 @@ export const Attendance = ({ data, loading, refreshData }) => {
           </>
         )}
       </div>
-      {showQrModal && selectedEvent && (
+      {showQrModal && selectedEvent && createPortal(
         <div className="modal-overlay" onClick={() => setShowQrModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: '360px' }}>
             <button className="drawer-close" onClick={() => setShowQrModal(false)}>
@@ -292,7 +310,8 @@ export const Attendance = ({ data, loading, refreshData }) => {
               Close
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

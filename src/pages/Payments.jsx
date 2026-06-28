@@ -1,22 +1,28 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import {
   CreditCard, Check, ShieldAlert, Landmark, Info, X, AlertCircle,
   Plus, Users, Calendar, CheckSquare, Square, Pencil, ThumbsUp, ThumbsDown,
-  ArrowRight, Clock, XCircle
+  ArrowRight, Clock, XCircle, Heart
 } from 'lucide-react';
 import './pages.css';
 
-const COMMITTEE_ROLES = ['President', 'Secretary', 'Treasurer'];
-const PAYMENT_CATEGORIES = [
-  'Membership Fee', 'Fellowship Drinks', 'Charity / Additional Donations',
-  'Event Registration', 'District Conference Fee', 'Club Dues',
-  'Project Contribution', 'Fine', 'Other'
-];
-
-// Fallback test UPI ID (Replace with an env variable or Chapter Profile setting in the future)
-const TEST_UPI_ID = "testupi@ybl";
+// Helper to load Razorpay SDK dynamically
+const loadRazorpayScript = () => {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
 
 // ── Diff row helper ───────────────────────────────────────────────────────────
 const DiffRow = ({ label, oldVal, newVal }) => {
@@ -35,12 +41,22 @@ const DiffRow = ({ label, oldVal, newVal }) => {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export const Payments = ({ data, loading, refreshData }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, globalConfig } = useAuth();
   const [activeTab, setActiveTab] = useState('dues');
+  
+  const COMMITTEE_ROLES = globalConfig?.coreCommitteeRoles || ['President', 'Secretary', 'Treasurer'];
+  const PAYMENT_CATEGORIES = globalConfig?.paymentCategories || [
+    'Membership Fee', 'Fellowship Drinks', 'Charity / Additional Donations',
+    'Event Registration', 'District Conference Fee', 'Club Dues',
+    'Project Contribution', 'Fine', 'Other'
+  ];
+  
+  const TEST_UPI_ID = "vineethjvenattu@okhdfcbank"; // Forced for testing
 
   // Payment gateway state
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('upi');
+  const [waitingForUpi, setWaitingForUpi] = useState(false);
   const [utr, setUtr] = useState('');
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -76,6 +92,13 @@ export const Payments = ({ data, loading, refreshData }) => {
   // Approval action state
   const [approvalBusy, setApprovalBusy] = useState('');
 
+  // Charity modal state
+  const [showCharityModal, setShowCharityModal] = useState(false);
+  const [charityAmount, setCharityAmount] = useState('');
+  const [charityDescription, setCharityDescription] = useState('');
+  const [charitySubmitting, setCharitySubmitting] = useState(false);
+  const [charityError, setCharityError] = useState('');
+
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>Loading Payments...</div>;
   }
@@ -83,9 +106,9 @@ export const Payments = ({ data, loading, refreshData }) => {
   const { payments = [], members = [], events = [], paymentEdits = [] } = data;
 
   const isCommittee = currentUser && COMMITTEE_ROLES.includes(currentUser["Role"]);
-  const isFinancialAdmin = currentUser && ["President", "Treasurer"].includes(currentUser["Role"]);
+  const isFinancialAdmin = isCommittee; // All core committee members can manage payments
 
-  const myId = currentUser?.["Member ID"];
+  const myId = String(currentUser?.["Member ID"] || currentUser?.id).trim();
 
   // Compute approval badge count for this user
   const myPendingApprovals = paymentEdits.filter(e =>
@@ -124,12 +147,109 @@ export const Payments = ({ data, loading, refreshData }) => {
   const handleProcessPayment = async (e) => {
     e.preventDefault();
     if (!selectedPayment) return;
-    if (paymentMethod === 'upi' && (!utr || utr.trim().length < 6)) { setPayError('Please enter a valid Transaction Reference (UTR)'); return; }
+    
+    if (paymentMethod === 'upi') {
+      setPayError('');
+      setWaitingForUpi(true);
+      
+      const res = await loadRazorpayScript();
+      if (!res) {
+        setPayError('Razorpay SDK failed to load. Are you online?');
+        setWaitingForUpi(false);
+        return;
+      }
+      
+      // In a real production app, you would fetch an order_id from the backend here.
+      // For this client-side demonstration, we use Razorpay standard checkout.
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY || "rzp_test_YourTestKeyHere", // Fallback test key
+        amount: Number(selectedPayment["Amount"]) * 100, // Amount is in currency subunits (paise)
+        currency: "INR",
+        name: "Rotary Club",
+        description: selectedPayment["Description"],
+        image: "https://upload.wikimedia.org/wikipedia/en/thumb/5/5b/Rotary_International_Seal.svg/1200px-Rotary_International_Seal.svg.png",
+        handler: async function (response) {
+            setWaitingForUpi(false);
+            setPaying(true);
+            try {
+              // response.razorpay_payment_id contains the successful payment ID
+              const result = await api.submitPaymentReference(selectedPayment["Payment ID"], response.razorpay_payment_id);
+              if (result.success) {
+                setPaySuccess(true);
+                setTimeout(async () => { 
+                  setSelectedPayment(null); 
+                  await refreshData(); 
+                  setPaySuccess(false);
+                }, 2000);
+              } else {
+                setPayError(result.error || 'Payment transaction failed on server.');
+              }
+            } catch (err) {
+              setPayError('Error processing payment confirmation');
+            } finally {
+              setPaying(false);
+            }
+        },
+        prefill: {
+            name: currentUser?.Name || "Member",
+            email: currentUser?.Email || "member@rotary.org",
+            contact: currentUser?.Mobile || "9999999999"
+        },
+        notes: {
+            payment_id: selectedPayment["Payment ID"]
+        },
+        theme: {
+            color: "#003da5"
+        },
+        modal: {
+            ondismiss: function() {
+                setWaitingForUpi(false);
+            }
+        }
+      };
+      
+      const rzp1 = new window.Razorpay(options);
+      rzp1.on('payment.failed', function (response){
+              setPayError("Payment Failed: " + response.error.description);
+              setWaitingForUpi(false);
+      });
+      rzp1.open();
+      
+      return;
+    } else if (paymentMethod === 'native_upi') {
+      if (!utr || utr.length < 6) {
+        setPayError('Please enter a valid Transaction ID/UTR (min 6 characters).');
+        return;
+      }
+      setPayError('');
+      setPaying(true);
+      try {
+        const result = await api.submitPaymentReference(selectedPayment["Payment ID"], utr);
+        if (result.success) {
+          setPaySuccess(true);
+          setTimeout(async () => { 
+            setSelectedPayment(null); 
+            await refreshData(); 
+            setPaySuccess(false);
+            setUtr('');
+          }, 2000);
+        } else {
+          setPayError(result.error || 'Failed to submit UTR.');
+        }
+      } catch (err) {
+        setPayError('Error submitting reference.');
+      } finally {
+        setPaying(false);
+      }
+      return;
+    }
+    
+    // Card flow
     if (paymentMethod === 'card' && (!cardNumber || !cardExpiry || !cardCvv)) { setPayError('Please fill in card details'); return; }
     setPayError('');
     setPaying(true);
     try {
-      const reference = paymentMethod === 'upi' ? utr : `CARD-${cardNumber.slice(-4)}`;
+      const reference = `CARD-${cardNumber.slice(-4)}`;
       const result = await api.submitPaymentReference(selectedPayment["Payment ID"], reference);
       if (result.success) {
         setPaySuccess(true);
@@ -211,6 +331,21 @@ export const Payments = ({ data, loading, refreshData }) => {
     finally { setEditSubmitting(false); }
   };
 
+  const handleProposeWaiver = async (p) => {
+    if (!window.confirm(`Propose to waive this fee of ₹${p["Amount"]} for ${p["Member Name"]}? This requires approval from the other two committee members.`)) return;
+    try {
+      const result = await api.proposePaymentWaiver(p["Payment ID"], p["Amount"], currentUser, members);
+      if (result.success) {
+        await refreshData();
+        alert('Waiver proposed successfully. Waiting for committee approval.');
+      } else {
+        alert("Failed to propose waiver: " + result.error);
+      }
+    } catch (e) {
+      alert("An unexpected error occurred while proposing waiver.");
+    }
+  };
+
   // ── Approval action handlers ──────────────────────────────────────────────
   const handleApprove = async (editId) => {
     setApprovalBusy(editId + '_approve');
@@ -246,6 +381,38 @@ export const Payments = ({ data, loading, refreshData }) => {
     return p ? p["Member Name"] : paymentId;
   };
 
+  const handleCreateCharityDonation = async (e) => {
+    e.preventDefault();
+    if (!charityAmount || Number(charityAmount) <= 0) {
+      setCharityError('Please enter a valid amount.');
+      return;
+    }
+    setCharitySubmitting(true);
+    setCharityError('');
+    try {
+      const result = await api.createCharityDonation(
+        data.events[0]?.chapterId || currentUser?.chapterId || 'amity-tvm',
+        myId,
+        currentUser?.Name || "Member",
+        charityAmount,
+        charityDescription
+      );
+      if (result.success) {
+        setShowCharityModal(false);
+        setCharityAmount('');
+        setCharityDescription('');
+        await refreshData();
+        alert("Donation entry created! Please pay it from the Dues list.");
+      } else {
+        setCharityError(result.error || 'Failed to create donation entry.');
+      }
+    } catch (err) {
+      setCharityError('An error occurred.');
+    } finally {
+      setCharitySubmitting(false);
+    }
+  };
+
   const getCommitteeMemberName = (memberId) => {
     const m = members.find(mem => mem["Member ID"] === memberId);
     return m ? m["Name"] : memberId;
@@ -261,11 +428,16 @@ export const Payments = ({ data, loading, refreshData }) => {
           <h1>Payments &amp; Dues</h1>
           <p className="page-subtitle">Track outstanding contributions and dues history</p>
         </div>
-        {isFinancialAdmin && (
-          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={openCreateModal}>
-            <Plus size={16} /> Add Receivable
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--rotary-gold)' }} onClick={() => setShowCharityModal(true)}>
+            <Heart size={16} /> Donate
           </button>
-        )}
+          {isFinancialAdmin && (
+            <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={openCreateModal}>
+              <Plus size={16} /> Add Receivable
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Outstanding banner */}
@@ -290,19 +462,21 @@ export const Payments = ({ data, loading, refreshData }) => {
           </h3>
           {myPendingApprovals.map(edit => {
             const paymentLabel = getAffectedMemberName(edit["Payment ID"]);
-            const isBusyApprove = approvalBusy === edit["Edit ID"] + '_approve';
-            const isBusyReject = approvalBusy === edit["Edit ID"] + '_reject';
+            const isBusyApprove = approvalBusy === edit.id + '_approve';
+            const isBusyReject = approvalBusy === edit.id + '_reject';
             return (
-              <div key={edit["Edit ID"]} className="card" style={{ marginBottom: 12, border: '1px solid var(--rotary-gold)', borderLeft: '4px solid var(--rotary-gold)' }}>
+              <div key={edit.id} className="card" style={{ marginBottom: 12, border: '1px solid var(--rotary-gold)', borderLeft: '4px solid var(--rotary-gold)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                   <div>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Edit proposed by {edit["Proposed By Name"]}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {edit["Type"] === "Waiver" ? "Waiver" : "Edit"} proposed by {edit["Proposed By Name"]}
+                    </span>
                     <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
                       For member: <strong>{paymentLabel}</strong> · {formatDisplayDate(edit["Proposed At"])}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    {edit["Required Approvers"].map(rid => {
+                    {(edit["Required Approvers"] || []).map(rid => {
                       const approved = edit["Approvals"]?.includes(rid);
                       const name = getCommitteeMemberName(rid);
                       return (
@@ -314,31 +488,34 @@ export const Payments = ({ data, loading, refreshData }) => {
                   </div>
                 </div>
 
-                {/* Diff */}
-                <div style={{ backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px', marginBottom: 12 }}>
-                  <DiffRow label="Amount" oldVal={`₹${Number(edit["Original"]["Amount"]).toLocaleString('en-IN')}`} newVal={`₹${Number(edit["Changes"]["Amount"]).toLocaleString('en-IN')}`} />
-                  <DiffRow label="Description" oldVal={edit["Original"]["Description"]} newVal={edit["Changes"]["Description"]} />
-                  <DiffRow label="Category" oldVal={edit["Original"]["Category"]} newVal={edit["Changes"]["Category"]} />
-                  <DiffRow label="Due Date" oldVal={formatDisplayDate(edit["Original"]["Due Date"])} newVal={formatDisplayDate(edit["Changes"]["Due Date"])} />
-                  <DiffRow label="Notes" oldVal={edit["Original"]["Notes"] || '—'} newVal={edit["Changes"]["Notes"] || '—'} />
-                  {["Amount", "Description", "Category", "Due Date", "Notes"].every(k => String(edit["Original"][k] || '') === String(edit["Changes"][k] || '')) && (
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No field changes detected.</span>
-                  )}
-                </div>
+                {/* Diff or Waiver Details */}
+                {edit["Type"] === "Waiver" ? (
+                  <div style={{ backgroundColor: '#fef2f2', borderRadius: 'var(--border-radius-md)', padding: '12px 14px', marginBottom: 12, border: '1px solid #fecaca' }}>
+                    <div style={{ fontSize: 13, color: '#dc2626', fontWeight: 600 }}>Proposed waiving of entire fee: ₹{Number(edit["Amount"]).toLocaleString('en-IN')}</div>
+                  </div>
+                ) : (
+                  <div style={{ backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px', marginBottom: 12 }}>
+                    <DiffRow label="Amount" oldVal={`₹${Number(edit["Original"]["Amount"]).toLocaleString('en-IN')}`} newVal={`₹${Number(edit["Changes"]["Amount"]).toLocaleString('en-IN')}`} />
+                    <DiffRow label="Due Date" oldVal={formatDisplayDate(edit["Original"]["Due Date"])} newVal={formatDisplayDate(edit["Changes"]["Due Date"])} />
+                    <DiffRow label="Description" oldVal={edit["Original"]["Description"]} newVal={edit["Changes"]["Description"]} />
+                    {edit["Original"]["Category"] !== edit["Changes"]["Category"] && <DiffRow label="Category" oldVal={edit["Original"]["Category"]} newVal={edit["Changes"]["Category"]} />}
+                    {edit["Original"]["Notes"] !== edit["Changes"]["Notes"] && <DiffRow label="Notes" oldVal={edit["Original"]["Notes"] || '—'} newVal={edit["Changes"]["Notes"] || '—'} />}
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button
                     className="btn btn-primary"
                     style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px', backgroundColor: 'var(--success)', borderColor: 'var(--success)' }}
-                    onClick={() => handleApprove(edit["Edit ID"])}
+                    onClick={() => handleApprove(edit.id)}
                     disabled={!!approvalBusy}
                   >
                     {isBusyApprove ? 'Processing...' : <><ThumbsUp size={15} /> Approve</>}
                   </button>
                   <button
                     className="btn btn-secondary"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px', color: 'var(--error)', borderColor: 'var(--error)' }}
-                    onClick={() => handleReject(edit["Edit ID"])}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px', color: 'var(--error)', borderColor: 'var(--error)' }}
+                    onClick={() => handleReject(edit.id)}
                     disabled={!!approvalBusy}
                   >
                     {isBusyReject ? 'Processing...' : <><ThumbsDown size={15} /> Reject</>}
@@ -359,15 +536,15 @@ export const Payments = ({ data, loading, refreshData }) => {
           {myProposedEdits.map(edit => {
             const paymentLabel = getAffectedMemberName(edit["Payment ID"]);
             const isRejected = edit["Status"] === "rejected";
-            const isBusyCancel = approvalBusy === edit["Edit ID"] + '_cancel';
+            const isBusyCancel = approvalBusy === edit.id + '_cancel';
             const approvedCount = edit["Approvals"]?.length || 0;
             const requiredCount = edit["Required Approvers"]?.length || 0;
             return (
-              <div key={edit["Edit ID"]} className="card" style={{ marginBottom: 10, borderLeft: `4px solid ${isRejected ? 'var(--error)' : 'var(--rotary-blue)'}` }}>
+              <div key={edit.id} className="card" style={{ marginBottom: 10, borderLeft: `4px solid ${isRejected ? 'var(--error)' : 'var(--rotary-blue)'}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700 }}>
-                      Edit for: {paymentLabel}
+                      {edit["Type"] === "Waiver" ? "Waiver" : "Edit"} for: {paymentLabel}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
                       Proposed on {formatDisplayDate(edit["Proposed At"])}
@@ -385,7 +562,7 @@ export const Payments = ({ data, loading, refreshData }) => {
                 </div>
                 {!isRejected && (
                   <button
-                    onClick={() => handleCancel(edit["Edit ID"])}
+                    onClick={() => handleCancel(edit.id)}
                     disabled={!!approvalBusy}
                     style={{ marginTop: 10, background: 'none', border: '1px solid var(--border-color)', padding: '6px 14px', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
                   >
@@ -414,7 +591,7 @@ export const Payments = ({ data, loading, refreshData }) => {
           (isFinancialAdmin ? allDues : myDues).length > 0 ? (
             (isFinancialAdmin ? allDues : myDues).map(p => {
               // Does this payment have a pending edit already?
-              const hasPendingEdit = paymentEdits.some(e => e["Payment ID"] === p["Payment ID"] && e["Status"] === "pending");
+              const pendingEdit = paymentEdits.find(e => e["Payment ID"] === p["Payment ID"] && e["Status"] === "pending");
               return (
                 <div key={p["Payment ID"]} className="card payment-row-card">
                   <div className="payment-row-info">
@@ -423,9 +600,9 @@ export const Payments = ({ data, loading, refreshData }) => {
                       {isFinancialAdmin && `Member: ${p["Member Name"]} • `}
                       Due: {formatDisplayDate(p["Due Date"])}{p["Category"] && ` • ${p["Category"]}`}
                     </span>
-                    {hasPendingEdit && (
+                    {pendingEdit && (
                       <span style={{ fontSize: 10, color: 'var(--rotary-gold)', fontWeight: 700, background: 'rgba(255,179,0,0.12)', padding: '2px 8px', borderRadius: 10, marginTop: 2, display: 'inline-block' }}>
-                        ⏳ Edit pending approval
+                        ⏳ {pendingEdit["Type"] === 'Waiver' ? 'Waiver pending approval' : 'Edit pending approval'}
                       </span>
                     )}
                   </div>
@@ -449,15 +626,25 @@ export const Payments = ({ data, loading, refreshData }) => {
                               Pay Now
                             </button>
                           )}
-                          {isCommittee && !hasPendingEdit && p["Member ID"] !== myId && (
-                            <button
-                              onClick={() => openEditModal(p)}
-                              className="btn btn-secondary"
-                              style={{ padding: '6px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 4 }}
-                              title="Propose an edit"
-                            >
-                              <Pencil size={13} /> Edit
-                            </button>
+                          {isCommittee && !pendingEdit && p["Member ID"] !== myId && (
+                            <>
+                              <button
+                                onClick={() => openEditModal(p)}
+                                className="btn btn-secondary"
+                                style={{ padding: '6px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                                title="Propose an edit"
+                              >
+                                <Pencil size={13} /> Edit
+                              </button>
+                              <button
+                                onClick={() => handleProposeWaiver(p)}
+                                className="btn btn-secondary"
+                                style={{ padding: '6px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 4, background: '#fef2f2', color: '#dc2626', borderColor: '#fecaca' }}
+                                title="Propose to waive this fee"
+                              >
+                                <X size={13} /> Waive
+                              </button>
+                            </>
                           )}
                         </>
                       )}
@@ -498,9 +685,9 @@ export const Payments = ({ data, loading, refreshData }) => {
         )}
       </div>
 
-      {/* ══ GATEWAY MODAL ═══════════════════════════════════════════════════════ */}
-      {selectedPayment && (
-        <div className="modal-overlay" onClick={() => setSelectedPayment(null)}>
+      {/* ══ PAYMENT DETAILS MODAL ═════════════════════════════════════════════════ */}
+      {selectedPayment && createPortal(
+        <div className="modal-overlay" onClick={() => setSelectedPayment(null)} style={{ zIndex: 1000 }}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <button className="drawer-close" onClick={() => setSelectedPayment(null)}><X size={24} /></button>
             <div className="gateway-header">
@@ -524,21 +711,57 @@ export const Payments = ({ data, loading, refreshData }) => {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Payment Method</label>
-                  <div style={{ display: 'flex', gap: 12 }}>
-                    <button type="button" className={`btn ${paymentMethod === 'upi' ? 'btn-primary' : 'btn-secondary'}`} style={{ flex: 1, padding: 10 }} onClick={() => setPaymentMethod('upi')}>UPI (GPay / PhonePe)</button>
-                    <button type="button" className={`btn ${paymentMethod === 'card' ? 'btn-primary' : 'btn-secondary'}`} style={{ flex: 1, padding: 10 }} onClick={() => setPaymentMethod('card')}>Card</button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <button type="button" className={`btn ${paymentMethod === 'upi' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: 10 }} onClick={() => setPaymentMethod('upi')}>Razorpay (Cards / NetBanking / Web UPI)</button>
+                    <button type="button" className={`btn ${paymentMethod === 'native_upi' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: 10 }} onClick={() => setPaymentMethod('native_upi')}>Direct UPI App (GPay / Paytm / PhonePe)</button>
                   </div>
                 </div>
-                {paymentMethod === 'upi' ? (
-                  <div className="form-group animate-fade-in" style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>Scan with any UPI app to pay</p>
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${TEST_UPI_ID}&pn=Rotary%20Club&am=${selectedPayment["Amount"]}&cu=INR&tn=${selectedPayment["Description"]}`)}`} 
-                      alt="UPI QR Code" 
-                      style={{ width: '150px', height: '150px', borderRadius: '8px', marginBottom: '16px' }}
-                    />
-                    <label className="form-label" style={{ textAlign: 'left', display: 'block' }}>Transaction Reference Number (UTR)</label>
-                    <input type="text" className="form-control" placeholder="e.g. 12-digit UTR from your bank app" value={utr} onChange={e => setUtr(e.target.value)} required />
+                {paymentMethod === 'native_upi' ? (
+                  <div className="form-group animate-fade-in" style={{ textAlign: 'center', padding: '10px 0' }}>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: 16 }}>Click below to instantly open GPay, Paytm, PhonePe, or other UPI apps installed on your device.</p>
+                    <a 
+                      href={`upi://pay?pa=${TEST_UPI_ID}&pn=${encodeURIComponent(data?.chapterConfig?.Name || "Rotary Club")}&am=${Number(selectedPayment["Amount"]).toFixed(2)}&cu=INR&tn=${encodeURIComponent(selectedPayment["Description"])}`} 
+                      className="btn btn-primary" 
+                      style={{ display: 'block', textDecoration: 'none', marginBottom: 16, background: '#16a34a', border: 'none', padding: 14 }}
+                    >
+                      Open Installed UPI App
+                    </a>
+                    
+                    <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', textAlign: 'left' }}>
+                      <p style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 600, margin: '0 0 8px' }}>After paying, enter your Transaction ID (UTR) to verify:</p>
+                      <input 
+                        type="text" 
+                        className="form-control" 
+                        placeholder="Enter 12-digit UTR or Reference ID" 
+                        value={utr}
+                        onChange={(e) => setUtr(e.target.value)}
+                        required={paymentMethod === 'native_upi'}
+                        style={{ marginBottom: 12 }}
+                      />
+                      <button 
+                        type="submit" 
+                        className="btn btn-primary" 
+                        style={{ width: '100%' }}
+                        disabled={paying}
+                      >
+                        {paying ? 'Submitting...' : 'Submit for Verification'}
+                      </button>
+                    </div>
+                  </div>
+                ) : paymentMethod === 'upi' ? (
+                  <div className="form-group animate-fade-in" style={{ textAlign: 'center', padding: '20px 0' }}>
+                    {waitingForUpi ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                        <div className="loading-spinner" style={{ width: '40px', height: '40px', border: '3px solid rgba(0,0,0,0.1)', borderTopColor: 'var(--rotary-blue)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--rotary-blue-dark)' }}>Razorpay Checkout Opened</p>
+                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>Please complete the payment in the secure Razorpay window.</p>
+                      </div>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 500 }}>Powered by Razorpay</p>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Click 'Pay' below to open the secure payment gateway.</p>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="animate-fade-in">
@@ -551,20 +774,23 @@ export const Payments = ({ data, loading, refreshData }) => {
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 11, margin: '20px 0' }}>
                   <ShieldAlert size={14} style={{ color: 'var(--success)' }} />
-                  <span>Your connection is encrypted. This is a simulated transaction.</span>
+                  <span>Your connection is encrypted. {paymentMethod === 'upi' ? 'Payments processed securely by Razorpay.' : 'This is a simulated transaction.'}</span>
                 </div>
-                <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: 14 }} disabled={paying}>
-                  {paying ? 'Processing...' : `Pay ₹${Number(selectedPayment["Amount"]).toLocaleString('en-IN')}`}
-                </button>
+                {paymentMethod !== 'native_upi' && (
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: 14 }} disabled={paying || waitingForUpi}>
+                    {paying || waitingForUpi ? 'Processing...' : (paymentMethod === 'upi' ? `Pay ₹${Number(selectedPayment["Amount"]).toLocaleString('en-IN')} with Razorpay` : `Pay ₹${Number(selectedPayment["Amount"]).toLocaleString('en-IN')}`)}
+                  </button>
+                )}
               </form>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ══ EDIT PAYMENT MODAL ══════════════════════════════════════════════════ */}
-      {showEditModal && editTarget && (
-        <div className="modal-overlay" onClick={closeEditModal}>
+      {showEditModal && editTarget && createPortal(
+        <div className="modal-overlay" onClick={closeEditModal} style={{ zIndex: 1000 }}>
           <div className="modal-content" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
             <button className="drawer-close" onClick={closeEditModal} disabled={editSubmitting}><X size={24} /></button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -625,12 +851,13 @@ export const Payments = ({ data, loading, refreshData }) => {
               </form>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ══ CREATE RECEIVABLE MODAL ══════════════════════════════════════════════ */}
-      {showCreateModal && (
-        <div className="modal-overlay" onClick={closeCreateModal}>
+      {showCreateModal && createPortal(
+        <div className="modal-overlay" onClick={closeCreateModal} style={{ zIndex: 1000 }}>
           <div className="modal-content" style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
             <button className="drawer-close" onClick={closeCreateModal} disabled={creating}><X size={24} /></button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -638,7 +865,7 @@ export const Payments = ({ data, loading, refreshData }) => {
                 <CreditCard size={20} color="white" />
               </div>
               <div>
-                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Create Payment Receivable</h2>
+                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: 'var(--rotary-blue-dark)' }}>Create Payment Receivable</h2>
                 <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>Raise a new due for selected members</p>
               </div>
             </div>
@@ -712,13 +939,50 @@ export const Payments = ({ data, loading, refreshData }) => {
                 <div style={{ display: 'flex', gap: 12 }}>
                   <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={closeCreateModal} disabled={creating}>Cancel</button>
                   <button type="submit" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} disabled={creating}>
-                    {creating ? 'Creating...' : <><Plus size={16} /> Create {selectedMemberIds.length > 0 ? `${selectedMemberIds.length} ` : ''}Receivable{selectedMemberIds.length !== 1 ? 's' : ''}</>}
+                    {creating ? 'Creating...' : <><Plus size={16} /> Create Dues</>}
                   </button>
                 </div>
               </form>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+      {/* CHARITY MODAL */}
+      {showCharityModal && createPortal(
+        <div className="modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="modal-content" style={{ maxWidth: 450 }}>
+            <button className="drawer-close" onClick={() => setShowCharityModal(false)}><X size={24} /></button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--rotary-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Heart size={20} color="white" />
+              </div>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Donate to Charity</h2>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>Contribute any amount to club charities</p>
+              </div>
+            </div>
+            {charityError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{charityError}</span></div>}
+            
+            <form onSubmit={handleCreateCharityDonation}>
+              <div className="form-group">
+                <label className="form-label">Donation Amount (₹) <span style={{ color: 'var(--error)' }}>*</span></label>
+                <input type="number" min="1" className="form-control" placeholder="e.g. 500" value={charityAmount} onChange={e => setCharityAmount(e.target.value)} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Purpose / Description</label>
+                <input type="text" className="form-control" placeholder="e.g. For Flood Relief Fund" value={charityDescription} onChange={e => setCharityDescription(e.target.value)} />
+              </div>
+              <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={() => setShowCharityModal(false)} disabled={charitySubmitting}>Cancel</button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'var(--rotary-gold)', border: 'none', color: '#000' }} disabled={charitySubmitting}>
+                  {charitySubmitting ? 'Creating...' : <><Heart size={16} /> Make Donation</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

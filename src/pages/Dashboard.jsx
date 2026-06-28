@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Avatar } from '../components/Avatar';
@@ -32,15 +33,63 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const [loadingPending, setLoadingPending] = useState(false);
   const [deletionRequests, setDeletionRequests] = useState([]);
   const [deletionConsents, setDeletionConsents] = useState({});
+  const [pendingRelations, setPendingRelations] = useState([]);
+  const [whatsNew, setWhatsNew] = useState([]);
 
   React.useEffect(() => {
-    if (isPresident || isSecretary) {
+    const unsubscribeWhatsNew = api.subscribeToWhatsNew((notifications) => {
+      setWhatsNew(notifications);
+    });
+    
+    if (isPresident || isSecretary || currentUser?.isSuperAdmin) {
       loadPending();
+      loadPendingRelations();
     }
-    if (["President", "Secretary", "Treasurer"].includes(currentUser?.["Role"])) {
+    if (["President", "Secretary", "Treasurer"].includes(currentUser?.["Role"]) || currentUser?.isSuperAdmin) {
       loadDeletionRequests();
     }
+    
+    return () => {
+      if (unsubscribeWhatsNew) unsubscribeWhatsNew();
+    };
   }, [isPresident, isSecretary, currentUser]);
+
+  const loadPendingRelations = async () => {
+    if (!currentUser?.chapterId) return;
+    const result = await api.getPendingRelations(currentUser.chapterId);
+    if (result.success) {
+      setPendingRelations(result.pending);
+    }
+  };
+
+  const formatWhatsAppText = (text) => {
+    if (!text) return null;
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+    return (
+      <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+        {lines.map((line, i) => {
+          // split by regex keeping the delimiters
+          const parts = line.split(/(\*.*?\*|_.*?_|~.*?~)/g);
+          return (
+            <li key={i} style={{ marginBottom: '4px' }}>
+              {parts.map((part, j) => {
+                if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+                  return <strong key={j}>{part.slice(1, -1)}</strong>;
+                }
+                if (part.startsWith('_') && part.endsWith('_') && part.length > 2) {
+                  return <em key={j}>{part.slice(1, -1)}</em>;
+                }
+                if (part.startsWith('~') && part.endsWith('~') && part.length > 2) {
+                  return <del key={j}>{part.slice(1, -1)}</del>;
+                }
+                return part;
+              })}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
 
   const loadPending = async () => {
     setLoadingPending(true);
@@ -98,6 +147,19 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     }
   };
 
+  const handleApproveRelation = async (memberId, relationIndex) => {
+    await api.approveRelation(currentUser.chapterId, memberId, relationIndex);
+    loadPendingRelations();
+    refreshData(true);
+  };
+
+  const handleRejectRelation = async (memberId, relationIndex) => {
+    if (window.confirm("Are you sure you want to reject this family relation?")) {
+      await api.rejectRelation(currentUser.chapterId, memberId, relationIndex);
+      loadPendingRelations();
+    }
+  };
+
   // Opinions Modal Form state
   const [showOpinionModal, setShowOpinionModal] = useState(false);
   const [opinionMemberId, setOpinionMemberId] = useState(currentUser?.["Member ID"] || '');
@@ -118,7 +180,9 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     tasks = [], 
     projectNotes = [], 
     opinions = [], 
-    payments = [] 
+    payments = [],
+    feedbacks = [],
+    paymentEdits = []
   } = data;
 
   // 1. Find Next Meeting / Event
@@ -129,10 +193,26 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const nextEvent = upcomingEvents[0];
 
   // 2. User's own pending tasks
-  const myTasks = tasks.filter(t => 
-    t["Assigned Member ID"] === currentUser?.["Member ID"] && 
+  const currentUserId = String(currentUser?.["Member ID"] || currentUser?.id).trim();
+
+  let myTasks = tasks.filter(t => 
+    String(t["Assigned Member ID"]).trim() === currentUserId && 
     t["Status"] === "Pending"
   );
+
+  const myPendingApprovals = paymentEdits.filter(e =>
+    e["Status"] === "pending" && (e["Required Approvers"] || []).includes(currentUserId)
+  );
+
+  const approvalTasks = myPendingApprovals.map(e => ({
+    "Task ID": e.id,
+    "Title": `${e["Type"] === "Waiver" ? "Waiver" : "Edit"} Approval: ${e["Amount"] ? `₹${e["Amount"]}` : ""}`,
+    "Target Date": e["Proposed At"] ? new Date(e["Proposed At"]).toLocaleDateString() : "Pending",
+    "Status": "Pending",
+    "isApproval": true
+  }));
+
+  myTasks = [...myTasks, ...approvalTasks];
 
   // 3. Meeting Projection Data
   const currentMeetingId = nextEvent?.["Event ID"] || "";
@@ -141,6 +221,12 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const meetingMinutes = data.minutes?.find(m => m["Event ID"] === currentMeetingId);
   const meetingOpinions = opinions.filter(o => o["Event ID"] === currentMeetingId);
   const meetingProjectNotes = projectNotes.filter(pn => pn["Event ID"] === currentMeetingId);
+
+  const myPendingDues = payments
+    .filter(p => p["Member ID"] === currentUser?.["Member ID"] && p["Status"] !== "Paid" && p["Status"] !== "Waived")
+    .reduce((sum, p) => sum + Number(p["Amount"] || 0), 0);
+  
+  const TEST_UPI_ID = data.chapterConfig?.upiId || import.meta.env.VITE_CLUB_UPI_ID || "testupi@ybl";
 
   const handleSaveOpinion = async (e) => {
     e.preventDefault();
@@ -214,20 +300,86 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const currentMonthStr = today.toLocaleString('default', { month: 'long' }).toLowerCase();
   const currentDay = today.getDate();
 
-  const celebratingToday = members.filter(m => {
-    if (!m["Birthday"]) return false;
-    const parts = String(m["Birthday"]).toLowerCase().trim().split(/\s+/);
-    if (parts.length < 2) return false;
-    const day = parseInt(parts[0], 10);
-    const month = parts[1];
-    return day === currentDay && month === currentMonthStr;
+  const maskYear = (dateStr) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = d.toLocaleString('en-US', { month: 'short' });
+      return `${day}-${month}-XXXX`;
+    }
+    const parts = String(dateStr).split('-');
+    if (parts.length === 3) return `${parts[0]}-${parts[1]}-XXXX`;
+    return "***";
+  };
+
+  const allCelebrations = [];
+  members.forEach(m => {
+    const parseDateStr = (dateStr) => {
+      if (!dateStr) return null;
+      const parts = String(dateStr).toLowerCase().trim().split(/[\s-]+/);
+      if (parts.length >= 2) {
+        if (parts[0].length === 4 && parts.length >= 3) {
+          const mNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+          const mIdx = parseInt(parts[1], 10) - 1;
+          const monthStr = mNames[mIdx];
+          // E.g., "1980-10-24"
+          let day = parseInt(parts[2], 10);
+          if (parts[2].includes('T')) day = parseInt(parts[2].split('T')[0], 10);
+          return { day, month: monthStr };
+        } else {
+          return { day: parseInt(parts[0], 10), month: parts[1] };
+        }
+      }
+      return null;
+    };
+
+    const bday = parseDateStr(m["Birthday"]);
+    if (bday) {
+      allCelebrations.push({
+        member: m,
+        title: m["Name"],
+        desc: `🎂 ${maskYear(m["Birthday"])}`,
+        day: bday.day,
+        month: bday.month,
+        mobile: m["Mobile"],
+        whatsappName: m["Name"]
+      });
+    }
+
+    const anniv = parseDateStr(m["Anniversary"]);
+    if (anniv) {
+      allCelebrations.push({
+        member: m,
+        title: m["Name"],
+        desc: `💍 ${m["Anniversary"]}`,
+        day: anniv.day,
+        month: anniv.month,
+        mobile: m["Mobile"],
+        whatsappName: m["Name"]
+      });
+    }
+
+    if (m.FamilyMembers && Array.isArray(m.FamilyMembers)) {
+      m.FamilyMembers.forEach(fm => {
+        const fmBday = parseDateStr(fm.birthday);
+        if (fmBday) {
+          allCelebrations.push({
+            member: m,
+            title: `${fm.name} (${fm.relation} of ${m["Name"].split(' ')[0]})`,
+            desc: `🎂 ${maskYear(fm.birthday)}`,
+            day: fmBday.day,
+            month: fmBday.month,
+            mobile: m["Mobile"],
+            whatsappName: fm.name
+          });
+        }
+      });
+    }
   });
 
-  const celebratingThisMonth = celebratingToday.length > 0 ? celebratingToday : members.filter(m => {
-    if (!m["Birthday"]) return false;
-    const parts = String(m["Birthday"]).toLowerCase().trim().split(/\s+/);
-    return parts.length >= 2 && parts[1] === currentMonthStr;
-  }).slice(0, 3);
+  const celebratingToday = allCelebrations.filter(c => c.day === currentDay && c.month === currentMonthStr);
+  const celebratingThisMonth = celebratingToday.length > 0 ? celebratingToday : allCelebrations.filter(c => c.month === currentMonthStr).slice(0, 5);
 
   const handleToggleTask = async (taskId, currentStatus) => {
     try {
@@ -301,6 +453,44 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                       </button>
                       <button 
                         onClick={() => handleApprove(member.id)}
+                        className="btn btn-primary"
+                        style={{ padding: '6px 10px', fontSize: '12px', background: '#10b981', border: 'none' }}
+                      >
+                        Approve
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+
+          {pendingRelations.length > 0 && (
+            <div style={{ background: 'var(--bg-secondary)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <Heart size={20} color="#f59e0b" />
+                <h3 style={{ margin: 0, color: '#f59e0b' }}>Pending Family Relations ({pendingRelations.length})</h3>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {pendingRelations.map((rel, idx) => (
+                  <div key={`${rel.memberId}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                    <div>
+                      <p style={{ margin: '0 0 4px 0', fontWeight: 'bold' }}>{rel.name}</p>
+                      <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        Relation: {rel.relation} • Mapped to: {rel.memberName}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        onClick={() => handleRejectRelation(rel.memberId, rel.relationIndex)}
+                        className="btn btn-secondary"
+                        style={{ padding: '6px 10px', fontSize: '12px', color: '#ef4444' }}
+                      >
+                        Reject
+                      </button>
+                      <button 
+                        onClick={() => handleApproveRelation(rel.memberId, rel.relationIndex)}
                         className="btn btn-primary"
                         style={{ padding: '6px 10px', fontSize: '12px', background: '#10b981', border: 'none' }}
                       >
@@ -730,6 +920,49 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
             </div>
           )}
 
+          {/* Admin Club UPI QR Code */}
+          {["President", "Secretary", "Treasurer"].includes(currentUser?.["Role"]) && (
+            <div className="card" style={{ marginBottom: '20px', borderLeft: '4px solid var(--success)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <DollarSign size={20} color="var(--success)" />
+                <h3 style={{ margin: 0, color: 'var(--success)' }}>Club UPI QR Code</h3>
+              </div>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>Have members scan this for direct payments to the club account.</p>
+              
+              <div style={{ textAlign: 'center' }}>
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${TEST_UPI_ID}&pn=Rotary%20Club&cu=INR`)}`} 
+                  alt="Club UPI QR Code" 
+                  style={{ width: '150px', height: '150px', borderRadius: '8px', marginBottom: '10px' }}
+                />
+                <p style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 600 }}>
+                  UPI ID: {TEST_UPI_ID}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Member Pending Dues Alert */}
+          {myPendingDues > 0 && (
+            <div className="card" style={{ marginBottom: '20px', borderLeft: '4px solid #ef4444', backgroundColor: 'var(--error-light)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: '0 0 4px 0', color: '#ef4444', fontSize: '15px' }}>Pending Dues</h3>
+                  <p style={{ margin: 0, fontSize: '22px', fontWeight: 'bold', color: '#ef4444' }}>
+                    ₹{myPendingDues.toLocaleString('en-IN')}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setActiveTab('payments')}
+                  className="btn btn-primary"
+                  style={{ backgroundColor: '#ef4444', border: 'none', padding: '10px 20px', fontWeight: 'bold', borderRadius: '8px', boxShadow: '0 4px 6px rgba(239, 68, 68, 0.2)' }}
+                >
+                  Pay Now
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Quick Actions Shortcuts Grid */}
           <div>
             <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '12px' }}>Quick Actions</h3>
@@ -803,7 +1036,13 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                   {myTasks.map(task => (
                     <div 
                       key={task["Task ID"]}
-                      onClick={() => handleToggleTask(task["Task ID"], task["Status"])}
+                      onClick={() => {
+                        if (task.isApproval) {
+                          setActiveTab('payments');
+                        } else {
+                          handleToggleTask(task["Task ID"], task["Status"]);
+                        }
+                      }}
                       style={{ display: 'flex', gap: '8px', padding: '10px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--border-radius-sm)', cursor: 'pointer', alignItems: 'flex-start' }}
                     >
                       <input 
@@ -841,21 +1080,21 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                 <p style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', marginBottom: '8px' }}>
                   {celebratingToday.length > 0 ? "Celebrating Today! 🎉" : `Celebrating in ${today.toLocaleString('default', { month: 'long' })}`}
                 </p>
-                {celebratingThisMonth.map((member, idx) => (
+                {celebratingThisMonth.map((celebration, idx) => (
                   <div key={idx} className="ticker-item">
-                    <Avatar member={member} size={56} className="ticker-avatar" />
+                    <Avatar member={celebration.member} size={56} className="ticker-avatar" />
                     <div className="ticker-info">
-                      <div className="ticker-name">{member["Name"]}</div>
+                      <div className="ticker-name">{celebration.title}</div>
                       <div className="ticker-desc">
-                        🎂 {member["Birthday"]} {member["Anniversary"] ? `• 💍 ${member["Anniversary"]}` : ''}
+                        {celebration.desc}
                       </div>
                     </div>
                     <div className="ticker-actions">
-                      <a href={`tel:${member["Mobile"]}`} className="action-btn-circle" title="Call">
+                      <a href={`tel:${celebration.mobile}`} className="action-btn-circle" title="Call">
                         <Phone size={14} />
                       </a>
                       <a 
-                        href={`https://wa.me/91${member["Mobile"]}?text=Hi%20${encodeURIComponent(member["Name"])},%20wishing%20you%20a%20very%20Happy%20Birthday!%20Have%20a%20wonderful%20day.`} 
+                        href={`https://wa.me/91${celebration.mobile}?text=Hi%20${encodeURIComponent(celebration.whatsappName)},%20wishing%20you%20a%20very%20Happy%20Celebration!%20Have%20a%20wonderful%20day.`} 
                         target="_blank" 
                         rel="noreferrer" 
                         className="action-btn-circle" 
@@ -876,9 +1115,9 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       </div>
 
       {/* OPINION SUBMISSION MODAL */}
-      {showOpinionModal && (
-        <div className="modal-overlay" style={{ zIndex: 300 }}>
-          <div className="modal-content" style={{ maxWidth: '450px', position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+      {showOpinionModal && createPortal(
+        <div className="modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="modal-content" style={{ maxWidth: '450px', position: 'relative', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
             <button 
               className="drawer-close" 
               onClick={() => setShowOpinionModal(false)}
@@ -993,6 +1232,41 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
               </div>
             </form>
           </div>
+        </div>,
+        document.body
+      )}
+
+      {/* WHAT'S NEW SECTION */}
+      {whatsNew && whatsNew.length > 0 && (
+        <div className="card whats-new-card" style={{ marginTop: '24px', padding: '24px', borderRadius: '16px', background: 'linear-gradient(to right, var(--bg-primary), var(--rotary-blue-light))', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ backgroundColor: 'var(--rotary-gold)', padding: '8px', borderRadius: '50%', color: 'white' }}>
+              <Bell size={20} />
+            </div>
+            <h3 style={{ fontSize: '18px', margin: 0, color: 'var(--text-primary)', fontWeight: 700 }}>What's new in this release</h3>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {whatsNew.slice(0, 2).map((wn) => (
+              <div key={wn.id} style={{ backgroundColor: 'var(--bg-primary)', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.03)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                  <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--rotary-blue)' }}>{wn.title}</h4>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    {new Date(wn.timestamp).toLocaleDateString()}
+                  </span>
+                </div>
+                {formatWhatsAppText(wn.content)}
+              </div>
+            ))}
+          </div>
+          {whatsNew.length > 2 && (
+            <button 
+              className="btn btn-secondary" 
+              style={{ width: '100%', marginTop: '16px', padding: '10px' }}
+              onClick={() => setActiveTab('whatsnew')}
+            >
+              More...
+            </button>
+          )}
         </div>
       )}
     </div>

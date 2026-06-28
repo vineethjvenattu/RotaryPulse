@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import Papa from 'papaparse';
 import { Avatar } from '../components/Avatar';
 import { Users, Upload, Download, ArrowLeft, UserCircle, Save, Plus, X } from 'lucide-react';
+import { getTagColor } from '../utils/tagColors';
 import './pages.css';
 
 export function ChapterProfile({ chapterId, chapterName, onBack }) {
@@ -18,37 +19,77 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
   const [assigningRole, setAssigningRole] = useState(null);
   const [selectedMemberId, setSelectedMemberId] = useState('');
 
+  // Assign Designations state
+  const [globalDesignations, setGlobalDesignations] = useState([]);
+  const [assigningDesignationsMember, setAssigningDesignationsMember] = useState(null);
+  const [selectedDesignations, setSelectedDesignations] = useState([]);
+  const [savingDesignations, setSavingDesignations] = useState(false);
+
+  // Settings State
+  const [fbPageId, setFbPageId] = useState('');
+  const [fbAccessToken, setFbAccessToken] = useState('');
+  const [upiId, setUpiId] = useState('');
+  const [allowedMemberCardFields, setAllowedMemberCardFields] = useState([]);
+  const [showRelations, setShowRelations] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+
   // Removal state
   const [removingMember, setRemovingMember] = useState(null);
-  const [pendingPayments, setPendingPayments] = useState([]);
-  const [duesAction, setDuesAction] = useState('none');
-  const [removalNotes, setRemovalNotes] = useState('');
-  const [fetchingPayments, setFetchingPayments] = useState(false);
-  const [proposingRemoval, setProposingRemoval] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [selectedMembers, setSelectedMembers] = useState(new Set());
+  const [bulkRemoving, setBulkRemoving] = useState(false);
 
-  const initiateRemoval = async (member) => {
+  const initiateRemoval = (member) => {
     setRemovingMember(member);
-    setFetchingPayments(true);
-    setDuesAction('none');
-    setRemovalNotes('');
-    const res = await api.getMemberPayments(member["Member ID"]);
-    if (res.success) {
-      setPendingPayments(res.pending);
-      if (res.pending.length > 0) setDuesAction('cleared');
-    }
-    setFetchingPayments(false);
   };
 
-  const handleProposeRemoval = async () => {
-    if (!removalNotes.trim()) return alert("Please provide a reason.");
-    setProposingRemoval(true);
-    const res = await api.proposeMemberDeletion(chapterId, removingMember["Member ID"], removalNotes, 'Admin', duesAction);
-    setProposingRemoval(false);
+  const handleDirectRemoval = async () => {
+    if (!removingMember) return;
+    setRemoving(true);
+    const res = await api.superAdminRemoveMember(chapterId, removingMember["Member ID"]);
+    setRemoving(false);
     if (res.success) {
-      alert("Removal proposed. Pending President, Secretary, and Treasurer approvals.");
       setRemovingMember(null);
+      fetchData();
     } else {
       alert("Error: " + res.error);
+    }
+  };
+
+  const handleBulkRemove = async () => {
+    if (selectedMembers.size === 0) return;
+    if (!window.confirm(`Are you sure you want to directly remove ${selectedMembers.size} members? This action cannot be undone.`)) return;
+
+    setBulkRemoving(true);
+    let successCount = 0;
+    for (const mId of selectedMembers) {
+      const res = await api.superAdminRemoveMember(chapterId, mId);
+      if (res.success) successCount++;
+    }
+    setBulkRemoving(false);
+    setSelectedMembers(new Set());
+    
+    if (successCount > 0) {
+      alert(`Successfully removed ${successCount} members.`);
+      fetchData();
+    }
+  };
+
+  const toggleMemberSelection = (mId) => {
+    const newSelected = new Set(selectedMembers);
+    if (newSelected.has(mId)) {
+      newSelected.delete(mId);
+    } else {
+      newSelected.add(mId);
+    }
+    setSelectedMembers(newSelected);
+  };
+
+  const toggleAllMembers = () => {
+    if (selectedMembers.size === members.length) {
+      setSelectedMembers(new Set());
+    } else {
+      setSelectedMembers(new Set(members.map(m => m["Member ID"])));
     }
   };
 
@@ -58,18 +99,80 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
 
   const fetchData = async () => {
     setLoading(true);
-    // Fetch global roles
-    const rolesRes = await api.getGlobalRoles();
-    if (rolesRes.success) {
-      setGlobalRoles(rolesRes.roles);
+    // Fetch global config
+    const configRes = await api.getGlobalConfig();
+    if (configRes.success) {
+      setGlobalRoles(configRes.config.roles || []);
+      setGlobalDesignations(configRes.config.rotaryDesignations || []);
+    }
+    // Fetch chapter settings
+    const chapterRes = await api.getChapterData(chapterId);
+    if (chapterRes.success && chapterRes.data) {
+      setFbPageId(chapterRes.data.fbPageId || '');
+      setFbAccessToken(chapterRes.data.fbAccessToken || '');
+      setUpiId(chapterRes.data.upiId || '');
+      setAllowedMemberCardFields(chapterRes.data.allowedMemberCardFields || []);
+      setShowRelations(chapterRes.data.showRelations || false);
     }
     // Fetch members for this chapter
     const memRes = await api.getChapterMembers(chapterId);
     if (memRes.success) {
-      const sortedMembers = [...memRes.members].sort((a, b) => (a.Name || '').localeCompare(b.Name || ''));
+      const getRank = (role) => {
+        if (!role || role === 'Member') return 99;
+        const confRes = globalRoles || []; // Fallback, though we know it's fetched
+        // Wait, globalRoles might not be populated in time because state setter setGlobalRoles is async in React and we are still in the same fetchData execution block.
+        // But we have configRes from lines above. Let's use it.
+        const gRoles = configRes && configRes.success && configRes.config.roles ? configRes.config.roles : ['President', 'Secretary', 'Treasurer'];
+        const idx = gRoles.indexOf(role);
+        if (idx !== -1) return idx + 1;
+        return 10;
+      };
+      const sortedMembers = [...memRes.members].sort((a, b) => {
+        const rankA = getRank(a.Role);
+        const rankB = getRank(b.Role);
+        if (rankA !== rankB) return rankA - rankB;
+        return (a.Name || '').localeCompare(b.Name || '');
+      });
       setMembers(sortedMembers);
     }
     setLoading(false);
+  };
+
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    const res = await api.updateChapterSettings(chapterId, { 
+      fbPageId, 
+      fbAccessToken, 
+      upiId,
+      allowedMemberCardFields,
+      showRelations
+    });
+    setSavingSettings(false);
+    if (res.success) {
+      alert("Settings saved successfully!");
+    } else {
+      alert("Error saving settings: " + res.error);
+    }
+  };
+
+  const handleAssignDesignations = async () => {
+    setSavingDesignations(true);
+    const res = await api.assignDesignations(chapterId, assigningDesignationsMember["Member ID"], selectedDesignations);
+    setSavingDesignations(false);
+    if (res.success) {
+      setAssigningDesignationsMember(null);
+      fetchData();
+    } else {
+      alert("Error saving designations: " + res.error);
+    }
+  };
+
+  const toggleDesignation = (desig) => {
+    if (selectedDesignations.includes(desig)) {
+      setSelectedDesignations(selectedDesignations.filter(d => d !== desig));
+    } else {
+      setSelectedDesignations([...selectedDesignations, desig]);
+    }
   };
 
   const handleDownloadTemplate = () => {
@@ -91,6 +194,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
       complete: async (results) => {
         try {
           const rawHeaders = results.meta.fields || [];
@@ -117,12 +221,13 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
             .map(row => {
               const nameStr = row['Name'] ? row['Name'].trim() : '';
               const rId = row['Rotary ID'] ? row['Rotary ID'].trim() : '';
+              const slNo = row['Sl No'] ? row['Sl No'].trim() : '';
               
               let email = row['E-mail'] ? row['E-mail'].trim() : '';
               const mobile = row['Mobile No'] ? row['Mobile No'].trim() : '';
               
-              let memberId = `TMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-              if (rId) memberId = rId;
+              // Generate deterministic ID based on Sl No seed
+              let memberId = slNo ? `MEM-${slNo.padStart(4, '0')}` : `TMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
               if (!email) {
                 email = `${memberId}@rotary.org`;
@@ -130,6 +235,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
 
               const resultRow = {
                 "Member ID": memberId,
+                "Rotary ID": rId,
                 "Name": nameStr,
                 "Name (Rotary ID)": rId ? `${nameStr} (${rId})` : nameStr,
                 "Email": email.toLowerCase(),
@@ -140,7 +246,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
               if (row['Address'] && row['Address'].trim()) resultRow["Address"] = row['Address'].trim();
               if (row['Profession'] && row['Profession'].trim()) resultRow["Profession"] = row['Profession'].trim();
               if (row['Spouse Name'] && row['Spouse Name'].trim()) resultRow["Spouse Name"] = row['Spouse Name'].trim();
-              if (row['DOB'] && row['DOB'].trim()) resultRow["DOB"] = row['DOB'].trim();
+              if (row['DOB'] && row['DOB'].trim()) resultRow["Birthday"] = row['DOB'].trim();
 
               return resultRow;
           });
@@ -248,6 +354,108 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
         </div>
       )}
 
+      <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px', borderBottom: '2px solid var(--border-color)', paddingBottom: '8px' }}>Integrations & Settings</h3>
+      <div style={{ 
+        backgroundColor: 'var(--bg-tertiary)', 
+        borderRadius: 'var(--border-radius-md)', 
+        padding: '24px', 
+        border: '1px solid var(--border-color)',
+        marginBottom: '32px'
+      }}>
+        <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-primary)', fontSize: '16px' }}>Facebook Gallery Configuration</h4>
+        <p style={{ margin: '0 0 20px 0', color: 'var(--text-secondary)', fontSize: '13px' }}>
+          Connect your chapter's Facebook Page to dynamically load photos into the Gallery. You will need a Long-Lived Page Access Token.
+        </p>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Facebook Page ID</label>
+            <input 
+              type="text" 
+              className="form-input" 
+              placeholder="e.g. 1206764219182291"
+              value={fbPageId}
+              onChange={(e) => setFbPageId(e.target.value)}
+              style={{ width: '100%', maxWidth: '400px' }}
+            />
+          </div>
+          
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Facebook Page Access Token</label>
+            <input 
+              type="password" 
+              className="form-input" 
+              placeholder="EAAOxxxxx..."
+              value={fbAccessToken}
+              onChange={(e) => setFbAccessToken(e.target.value)}
+              style={{ width: '100%', maxWidth: '600px' }}
+            />
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Club UPI ID</label>
+            <input 
+              type="text" 
+              className="form-input" 
+              placeholder="e.g. rotaryclub@ybl"
+              value={upiId}
+              onChange={(e) => setUpiId(e.target.value)}
+              style={{ width: '100%', maxWidth: '400px' }}
+            />
+        </div>
+        
+        <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '24px 0' }} />
+        
+        <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-primary)', fontSize: '16px' }}>Member Directory Fields</h4>
+        <p style={{ margin: '0 0 20px 0', color: 'var(--text-secondary)', fontSize: '13px' }}>
+          Select which data fields regular members are allowed to see in the member directory cards. (Super Admins always see all fields).
+        </p>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+          {Array.from(new Set(members.flatMap(m => Object.keys(m))))
+            .filter(k => !['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations'].includes(k))
+            .map(field => (
+              <label key={field} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
+                <input 
+                  type="checkbox" 
+                  checked={allowedMemberCardFields.includes(field)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setAllowedMemberCardFields([...allowedMemberCardFields, field]);
+                    } else {
+                      setAllowedMemberCardFields(allowedMemberCardFields.filter(f => f !== field));
+                    }
+                  }}
+                />
+                {field}
+              </label>
+            ))
+          }
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+          <input 
+            type="checkbox" 
+            id="showRelationsConfig"
+            checked={showRelations}
+            onChange={(e) => setShowRelations(e.target.checked)}
+          />
+          <label htmlFor="showRelationsConfig" style={{ fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}>
+            Show Approved Relations in Member Cards
+          </label>
+        </div>
+        </div>
+        
+        <button 
+          className="btn btn-primary" 
+          onClick={handleSaveSettings} 
+          disabled={savingSettings}
+          style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <Save size={16} /> {savingSettings ? 'Saving...' : 'Save Settings'}
+        </button>
+      </div>
+
       <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px', borderBottom: '2px solid var(--border-color)', paddingBottom: '8px' }}>Chapter Leadership Roles</h3>
       
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px', marginBottom: '32px' }}>
@@ -272,7 +480,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
                   </div>
                   <div>
                     <div style={{ fontWeight: 600, color: 'var(--rotary-blue-dark)', fontSize: '16px' }}>{occupant.Name}</div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{occupant.Email}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Rotary ID: {occupant["Rotary ID"] || "N/A"}</div>
                   </div>
                 </div>
               ) : (
@@ -299,7 +507,19 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
         })}
       </div>
 
-      <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px', borderBottom: '2px solid var(--border-color)', paddingBottom: '8px' }}>All Chapter Members</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '2px solid var(--border-color)', paddingBottom: '8px' }}>
+        <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', margin: 0 }}>All Chapter Members</h3>
+        {selectedMembers.size > 0 && (
+          <button 
+            className="btn btn-primary" 
+            style={{ background: '#ef4444', border: 'none', display: 'flex', alignItems: 'center', gap: '8px' }}
+            onClick={handleBulkRemove}
+            disabled={bulkRemoving}
+          >
+            {bulkRemoving ? 'Removing...' : `Bulk Remove (${selectedMembers.size})`}
+          </button>
+        )}
+      </div>
       
       {members.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--border-radius-md)' }}>
@@ -312,39 +532,79 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border-color)', backgroundColor: 'var(--bg-primary)' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--rotary-blue-dark)' }}>Name & Email</th>
+                <th style={{ padding: '12px 16px', width: '40px', textAlign: 'center' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={members.length > 0 && selectedMembers.size === members.length}
+                    onChange={toggleAllMembers}
+                    style={{ cursor: 'pointer' }}
+                  />
+                </th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--rotary-blue-dark)' }}>Name & Rotary ID</th>
                 <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--rotary-blue-dark)' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {members.map(m => (
                 <tr key={m["Member ID"]} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedMembers.has(m["Member ID"])}
+                      onChange={() => toggleMemberSelection(m["Member ID"])}
+                      style={{ cursor: 'pointer' }}
+                    />
+                  </td>
                   <td style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <Avatar member={m} size={28} className="chapter-member-avatar" />
                     <div>
-                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '14px', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {m.Name}
-                        {m.Role && m.Role !== 'Member' && (
-                          <span style={{ 
-                            padding: '2px 8px', 
-                            borderRadius: '12px', 
-                            fontSize: '11px', 
-                            fontWeight: 700,
-                            backgroundColor: 'var(--rotary-blue)',
-                            color: 'white',
-                            display: 'inline-block'
-                          }}>
-                            {m.Role}
-                          </span>
-                        )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{m.Name}</div>
+                        {(m.Designations || []).map(d => {
+                          const tagColor = getTagColor(d);
+                          return (
+                            <span key={d} style={{
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              backgroundColor: tagColor.bg,
+                              color: tagColor.text,
+                              border: `1px solid ${tagColor.bg}`,
+                              display: 'inline-block'
+                            }}>
+                              {d}
+                            </span>
+                          );
+                        })}
                       </div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{m.Email}</div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Rotary ID: {m["Rotary ID"] || "N/A"}</div>
                     </div>
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                    <button onClick={() => initiateRemoval(m)} className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px', color: '#ef4444', borderColor: '#ef4444' }}>
-                      Remove
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                      {m.Role && m.Role !== 'Member' && (
+                        <span style={{ 
+                          padding: '2px 8px', 
+                          borderRadius: '12px', 
+                          fontSize: '11px', 
+                          fontWeight: 700,
+                          backgroundColor: 'var(--rotary-blue)',
+                          color: 'white',
+                          display: 'inline-block'
+                        }}>
+                          {m.Role}
+                        </span>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => { setAssigningDesignationsMember(m); setSelectedDesignations(m.Designations || []); }} className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }}>
+                          Tags
+                        </button>
+                        <button onClick={() => initiateRemoval(m)} className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px', color: '#ef4444', borderColor: '#ef4444' }}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -375,7 +635,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
                 <option value="">-- Select Member --</option>
                 {members.map(m => (
                   <option key={m["Member ID"]} value={m["Member ID"]}>
-                    {m.Name} ({m.Email})
+                    {m.Name} (Rotary ID: {m["Rotary ID"] || "N/A"})
                   </option>
                 ))}
               </select>
@@ -397,58 +657,81 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
         document.body
       )}
 
+      {/* ASSIGN DESIGNATIONS MODAL */}
+      {assigningDesignationsMember && createPortal(
+        <div className="modal-overlay" style={{ zIndex: 300 }}>
+          <div className="modal-content" style={{ maxWidth: '500px' }}>
+            <button className="drawer-close" onClick={() => setAssigningDesignationsMember(null)}><X size={24} /></button>
+            <h2 style={{ marginBottom: '8px', fontSize: '20px' }}>Designations</h2>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+              Assign tags/designations to <strong>{assigningDesignationsMember.Name}</strong>.
+            </p>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '24px' }}>
+              {globalDesignations.map(desig => {
+                const isSelected = selectedDesignations.includes(desig);
+                const tagColor = getTagColor(desig);
+                return (
+                  <button 
+                    key={desig}
+                    onClick={() => {
+                      if (selectedDesignations.includes(desig)) {
+                        setSelectedDesignations(selectedDesignations.filter(d => d !== desig));
+                      } else {
+                        setSelectedDesignations([...selectedDesignations, desig]);
+                      }
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '16px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: isSelected ? `1px solid ${tagColor.bg}` : '1px solid var(--border-color)',
+                      backgroundColor: isSelected ? tagColor.bg : 'transparent',
+                      color: isSelected ? tagColor.text : 'var(--text-secondary)',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {desig}
+                  </button>
+                );
+              })}
+              {globalDesignations.length === 0 && (
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No designations configured in Global Settings.</p>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setAssigningDesignationsMember(null)}>Cancel</button>
+              <button 
+                className="btn btn-primary" 
+                style={{ flex: 1 }} 
+                onClick={handleAssignDesignations}
+                disabled={savingDesignations}
+              >
+                {savingDesignations ? 'Saving...' : 'Save Designations'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* REMOVAL MODAL */}
       {removingMember && createPortal(
         <div className="modal-overlay" style={{ zIndex: 300 }}>
-          <div className="modal-content" style={{ maxWidth: '450px' }}>
+          <div className="modal-content" style={{ maxWidth: '400px' }}>
             <button className="drawer-close" onClick={() => setRemovingMember(null)}><X size={24} /></button>
             <h2 style={{ marginBottom: '8px', fontSize: '20px', color: '#ef4444' }}>Remove Member</h2>
-            <p style={{ fontSize: '14px', marginBottom: '16px' }}><strong>{removingMember.Name}</strong></p>
+            <p style={{ fontSize: '14px', marginBottom: '24px' }}>Are you sure you want to remove <strong>{removingMember.Name}</strong>? This will permanently delete the member immediately without requiring approvals.</p>
 
-            {fetchingPayments ? (
-              <p>Checking pending dues...</p>
-            ) : (
-              <>
-                {pendingPayments.length > 0 ? (
-                  <div style={{ backgroundColor: 'var(--error-light)', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-                    <h4 style={{ color: 'var(--error)', margin: '0 0 8px 0', fontSize: '14px' }}>Pending Dues Detected ({pendingPayments.length})</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input type="radio" name="dues" checked={duesAction === 'cleared'} onChange={() => setDuesAction('cleared')} />
-                        Confirm dues cleared externally
-                      </label>
-                      <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input type="radio" name="dues" checked={duesAction === 'waiver_requested'} onChange={() => setDuesAction('waiver_requested')} />
-                        Request dues waiver from approvers
-                      </label>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ backgroundColor: 'var(--success-light)', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-                    <p style={{ color: 'var(--success)', margin: 0, fontSize: '13px', fontWeight: 'bold' }}>No pending dues. Safe to remove.</p>
-                  </div>
-                )}
-
-                <div className="form-group" style={{ marginBottom: '24px' }}>
-                  <label className="form-label">Reason for Removal</label>
-                  <textarea 
-                    className="form-input" 
-                    rows={3}
-                    value={removalNotes} 
-                    onChange={e => setRemovalNotes(e.target.value)}
-                    placeholder="Provide a reason..."
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setRemovingMember(null)}>Cancel</button>
-                  <button className="btn btn-primary" style={{ flex: 1, background: '#ef4444', border: 'none', color: 'white' }} onClick={handleProposeRemoval} disabled={proposingRemoval}>
-                    {proposingRemoval ? 'Proposing...' : 'Propose Removal'}
-                  </button>
-                </div>
-              </>
-            )}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setRemovingMember(null)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 1, background: '#ef4444', border: 'none', color: 'white' }} onClick={handleDirectRemoval} disabled={removing}>
+                {removing ? 'Removing...' : 'Remove Immediately'}
+              </button>
+            </div>
           </div>
         </div>,
         document.body

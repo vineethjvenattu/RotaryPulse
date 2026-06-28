@@ -9,6 +9,8 @@ import './pages.css';
 
 export const Members = ({ data, loading, refreshData }) => {
   const { isPresident, currentUser, role } = useAuth();
+  const [chapterSettings, setChapterSettings] = useState(null);
+  const [globalRoles, setGlobalRoles] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [classificationFilter, setClassificationFilter] = useState('');
   const [bloodGroupFilter, setBloodGroupFilter] = useState('');
@@ -20,6 +22,17 @@ export const Members = ({ data, loading, refreshData }) => {
   const [pendingPayments, setPendingPayments] = useState([]);
   const [duesAction, setDuesAction] = useState('none');
   const [fetchingPayments, setFetchingPayments] = useState(false);
+
+  React.useEffect(() => {
+    if (currentUser?.chapterId) {
+      api.getChapterData(currentUser.chapterId).then(res => {
+        if (res.success) setChapterSettings(res.data);
+      });
+    }
+    api.getGlobalConfig().then(res => {
+      if (res.success) setGlobalRoles(res.config.roles || []);
+    });
+  }, [currentUser]);
 
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>Loading Members...</div>;
@@ -59,6 +72,48 @@ export const Members = ({ data, loading, refreshData }) => {
     }
   };
 
+  const systemFields = ['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations'];
+  
+  const standardFieldOrder = ["Gender", "Birthday", "Blood Group", "Spouse Name", "Email", "Address", "Profession", "Classification"];
+  
+  const sortFields = (a, b) => {
+    const idxA = standardFieldOrder.indexOf(a);
+    const idxB = standardFieldOrder.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.localeCompare(b);
+  };
+  
+  const getDynamicFields = (member) => {
+    const keys = Object.keys(member).filter(k => !systemFields.includes(k) && member[k]);
+    keys.sort(sortFields);
+    if (currentUser?.isSuperAdmin) return keys;
+    if (!chapterSettings?.allowedMemberCardFields) return [];
+    return keys.filter(k => chapterSettings.allowedMemberCardFields.includes(k));
+  };
+  
+  const formatFieldValue = (field, value, memberId) => {
+    if (field === 'Birthday' && value && value !== "Not Specified") {
+      const canViewFull = currentUser?.isSuperAdmin || currentUser?.["Member ID"] === memberId;
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) {
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = d.toLocaleString('en-US', { month: 'short' });
+        let year = d.getFullYear();
+        if (year < 100) year += 2000;
+        return canViewFull ? `${day}-${month}-${year}` : `${day}-${month}-XXXX`;
+      }
+      if (!canViewFull) {
+        const parts = String(value).split('-');
+        if (parts.length === 3) return `${parts[0]}-${parts[1]}-XXXX`;
+        return "***";
+      }
+      return value;
+    }
+    return value;
+  };
+
   const { members = [] } = data;
 
   // Extract unique classifications and blood groups for filters
@@ -67,9 +122,11 @@ export const Members = ({ data, loading, refreshData }) => {
 
   // Filter members list
   const filteredMembers = members.filter(m => {
+    const searchLower = searchTerm.toLowerCase();
     const matchesSearch = 
-      m["Name"].toLowerCase().includes(searchTerm.toLowerCase()) || 
-      (m["Classification"] && m["Classification"].toLowerCase().includes(searchTerm.toLowerCase()));
+      m["Name"].toLowerCase().includes(searchLower) || 
+      (m["Classification"] && m["Classification"].toLowerCase().includes(searchLower)) ||
+      (m.FamilyMembers && m.FamilyMembers.some(fm => fm.name && fm.name.toLowerCase().includes(searchLower)));
       
     const matchesClassification = !classificationFilter || m["Classification"] === classificationFilter;
     const matchesBlood = !bloodGroupFilter || m["Blood Group"] === bloodGroupFilter;
@@ -120,22 +177,107 @@ export const Members = ({ data, loading, refreshData }) => {
 
       {/* Members Cards Grid */}
       {filteredMembers.length > 0 ? (
-        <div className="members-grid">
-          {filteredMembers.map((member) => (
-            <div 
-              key={member["Member ID"]} 
-              className="card member-card"
-              onClick={() => setSelectedMember(member)}
-            >
-              <Avatar member={member} size={60} className="member-avatar-lg" />
-              <div className="member-meta-info">
-                <div className="member-name-text">{member["Name"]}</div>
-                <div className="member-card-role">{member["Role"]}</div>
-                <div className="member-card-phone">{member["Mobile"]}</div>
+        <>
+          {filteredMembers.filter(m => m.Role && m.Role !== 'Member').length > 0 && (
+            <>
+              <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '24px' }}>Chapter Leadership Roles</h2>
+              <div className="members-grid">
+                {filteredMembers
+                  .filter(m => m.Role && m.Role !== 'Member')
+                  .sort((a, b) => {
+                    const idxA = globalRoles.indexOf(a.Role);
+                    const idxB = globalRoles.indexOf(b.Role);
+                    const rankA = idxA !== -1 ? idxA : 99;
+                    const rankB = idxB !== -1 ? idxB : 99;
+                    if (rankA !== rankB) return rankA - rankB;
+                    return (a.Name || '').localeCompare(b.Name || '');
+                  })
+                  .map((member) => (
+                  <div 
+                    key={member["Member ID"]} 
+                    className="card member-card"
+                    onClick={() => setSelectedMember(member)}
+                  >
+                    <Avatar member={member} size={60} className="member-avatar-lg" />
+                    <div className="member-meta-info">
+                      <div className="member-name-text">{member["Name"]}</div>
+                      <div className="member-card-role">{member["Role"]}</div>
+                      <div className="member-card-phone">{member["Mobile"]}</div>
+                      {member["Rotary ID"] && <div className="member-card-rid" style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>ID: {member["Rotary ID"]}</div>}
+                      
+                      <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {getDynamicFields(member).map(field => (
+                          <div key={field} style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            <span style={{ fontWeight: 500 }}>{field}:</span> {formatFieldValue(field, member[field], member["Member ID"])}
+                          </div>
+                        ))}
+                      </div>
+
+                      {chapterSettings?.showRelations && member.FamilyMembers?.some(fm => fm.status === 'approved') && (
+                        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--border-color)' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '4px' }}>RELATIONS</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {member.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
+                              <div key={idx} style={{ padding: '2px 8px', borderRadius: '12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', fontSize: '11px', color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--rotary-gold)' }}></div>
+                                {fm.name} <span style={{ opacity: 0.6 }}>({fm.relation})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
-          ))}
-        </div>
+            </>
+          )}
+
+          {filteredMembers.filter(m => !m.Role || m.Role === 'Member').length > 0 && (
+            <>
+              <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '24px' }}>Members</h2>
+              <div className="members-grid">
+                {filteredMembers.filter(m => !m.Role || m.Role === 'Member').map((member) => (
+                  <div 
+                    key={member["Member ID"]} 
+                    className="card member-card"
+                    onClick={() => setSelectedMember(member)}
+                  >
+                    <Avatar member={member} size={60} className="member-avatar-lg" />
+                    <div className="member-meta-info">
+                      <div className="member-name-text">{member["Name"]}</div>
+                      <div className="member-card-role">{member["Role"]}</div>
+                      <div className="member-card-phone">{member["Mobile"]}</div>
+                      {member["Rotary ID"] && <div className="member-card-rid" style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>ID: {member["Rotary ID"]}</div>}
+                      
+                      <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {getDynamicFields(member).map(field => (
+                          <div key={field} style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            <span style={{ fontWeight: 500 }}>{field}:</span> {formatFieldValue(field, member[field], member["Member ID"])}
+                          </div>
+                        ))}
+                      </div>
+
+                      {chapterSettings?.showRelations && member.FamilyMembers?.some(fm => fm.status === 'approved') && (
+                        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--border-color)' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '4px' }}>RELATIONS</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {member.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
+                              <div key={idx} style={{ padding: '2px 8px', borderRadius: '12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', fontSize: '11px', color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--rotary-gold)' }}></div>
+                                {fm.name} <span style={{ opacity: 0.6 }}>({fm.relation})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
       ) : (
         <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
           <Info size={36} style={{ color: 'var(--text-muted)', marginBottom: '12px' }} />
@@ -149,7 +291,7 @@ export const Members = ({ data, loading, refreshData }) => {
           <div className="drawer-content" onClick={(e) => e.stopPropagation()}>
             <div className="drawer-top-bar">
               <button className="drawer-back-btn" onClick={() => setSelectedMember(null)} title="Back">
-                <ArrowLeft size={24} color="white" />
+                <ArrowLeft size={20} color="white" />
               </button>
               <div className="drawer-header-actions">
                 {isPresident && (
@@ -167,8 +309,8 @@ export const Members = ({ data, loading, refreshData }) => {
                       if (res.pending && res.pending.length > 0) setDuesAction('cleared');
                     }
                     setFetchingPayments(false);
-                  }} title="Manage Member">
-                    <Edit2 size={18} />
+                  }} title="Edit Member Profile">
+                    <Edit2 size={16} color="white" />
                   </button>
                 )}
               </div>
@@ -212,29 +354,40 @@ export const Members = ({ data, loading, refreshData }) => {
             {/* Profile Fields List */}
             <div className="member-detail-fields-card">
               <div className="detail-field-row">
+                <span className="detail-field-label">Rotary ID</span>
+                <span className="detail-field-value">{selectedMember["Rotary ID"] || "Not Specified"}</span>
+              </div>
+              <div className="detail-field-row">
                 <span className="detail-field-label">Phone</span>
                 <span className="detail-field-value">{selectedMember["Mobile"]}</span>
               </div>
-              <div className="detail-field-row">
-                <span className="detail-field-label">Email</span>
-                <span className="detail-field-value" style={{ wordBreak: 'break-all' }}>{selectedMember["Email"]}</span>
-              </div>
-              <div className="detail-field-row">
-                <span className="detail-field-label">Classification</span>
-                <span className="detail-field-value">{selectedMember["Classification"] || "Not Specified"}</span>
-              </div>
-              <div className="detail-field-row">
-                <span className="detail-field-label">Blood Group</span>
-                <span className="detail-field-value">{selectedMember["Blood Group"] || "Not Specified"}</span>
-              </div>
-              <div className="detail-field-row">
-                <span className="detail-field-label">Birthday</span>
-                <span className="detail-field-value">{selectedMember["Birthday"] || "Not Specified"}</span>
-              </div>
-              <div className="detail-field-row">
-                <span className="detail-field-label">Anniversary</span>
-                <span className="detail-field-value">{selectedMember["Anniversary"] || "Not Specified"}</span>
-              </div>
+              
+              {/* Dynamic Non-System Fields */}
+              {Object.keys(selectedMember)
+                .filter(k => !['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations'].includes(k))
+                .sort(sortFields)
+                .map(field => (
+                  <div className="detail-field-row" key={field}>
+                    <span className="detail-field-label">{field}</span>
+                    <span className="detail-field-value" style={field === 'Email' ? { wordBreak: 'break-all' } : {}}>{formatFieldValue(field, selectedMember[field] || "Not Specified", selectedMember["Member ID"])}</span>
+                  </div>
+              ))}
+              
+              {selectedMember.FamilyMembers?.some(fm => fm.status === 'approved') && (
+                <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>Approved Relations</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {selectedMember.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'var(--bg-tertiary)', borderRadius: '6px' }}>
+                        <div>
+                          <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{fm.name}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{fm.relation}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>,
@@ -252,9 +405,9 @@ export const Members = ({ data, loading, refreshData }) => {
               <label>Role</label>
               <select className="input-field" value={editRole} onChange={(e) => setEditRole(e.target.value)}>
                 <option value="Member">Member</option>
-                <option value="President">President</option>
-                <option value="Secretary">Secretary</option>
-                <option value="Treasurer">Treasurer</option>
+                {globalRoles.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
               </select>
             </div>
             

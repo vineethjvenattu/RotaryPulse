@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Calendar, MapPin, Clock, Plus, X, PlusCircle } from 'lucide-react';
@@ -7,7 +8,8 @@ import './pages.css';
 export const Events = ({ data, loading, refreshData }) => {
   const { canManageEvents } = useAuth();
   const [activeTab, setActiveTab] = useState('upcoming');
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [editingEventId, setEditingEventId] = useState(null);
   
   // Form State
   const [eventName, setEventName] = useState('');
@@ -24,19 +26,86 @@ export const Events = ({ data, loading, refreshData }) => {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>Loading Events...</div>;
   }
 
-  const { events = [] } = data;
+  const { events = [], members = [] } = data;
   const todayStr = new Date().toISOString().split('T')[0];
+  const currentYear = new Date().getFullYear();
+
+  // Generate birthday events dynamically
+  const birthdayEvents = members
+    .filter(m => m["Birthday"])
+    .map(m => {
+      const d = new Date(m["Birthday"]);
+      if (isNaN(d.getTime())) return null;
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      
+      let eventDateStr = `${currentYear}-${month}-${day}`;
+      // Project to next year if the birthday has already passed this year
+      if (eventDateStr < todayStr) {
+        eventDateStr = `${currentYear + 1}-${month}-${day}`;
+      }
+
+      return {
+        "Event ID": `bday-${m["Member ID"]}-${eventDateStr}`,
+        "Event Name": `${m["Name"]}'s Birthday 🎂`,
+        "Date": eventDateStr,
+        "Time": "All Day",
+        "Venue": "",
+        "Type": "Birthday",
+        "Description": `Wish ${m["Name"]} a very happy birthday!`
+      };
+    })
+    .filter(Boolean);
+
+  const allEvents = [...events, ...birthdayEvents];
 
   // Split events into Upcoming vs Past
-  const upcomingEvents = events
+  const upcomingEvents = allEvents
     .filter(e => e["Date"] >= todayStr)
     .sort((a, b) => a["Date"].localeCompare(b["Date"]));
 
-  const pastEvents = events
+  const pastEvents = allEvents
     .filter(e => e["Date"] < todayStr)
     .sort((a, b) => b["Date"].localeCompare(a["Date"])); // Reverse chronological for past events
 
   const currentList = activeTab === 'upcoming' ? upcomingEvents : pastEvents;
+
+  const openAddModal = () => {
+    setEditingEventId(null);
+    setEventName('');
+    setDate('');
+    setTime('');
+    setVenue('');
+    setType('Meeting');
+    setDescription('');
+    setShowEventModal(true);
+  };
+
+  const openEditModal = (event) => {
+    setEditingEventId(event["Event ID"]);
+    setEventName(event["Event Name"] || event["Title"] || '');
+    setDate(event["Date"] || '');
+    setTime(event["Time"] || '');
+    setVenue(event["Venue"] || '');
+    setType(event["Type"] || 'Meeting');
+    setDescription(event["Description"] || '');
+    setShowEventModal(true);
+  };
+
+  const handleDeleteEvent = async (eventId) => {
+    if (!window.confirm("Are you sure you want to delete this event?")) return;
+    
+    try {
+      const result = await api.deleteEvent(data.events[0]?.chapterId || 'amity-tvm', eventId);
+      if (result.success) {
+        await refreshData();
+      } else {
+        alert("Failed to delete event: " + result.error);
+      }
+    } catch (err) {
+      alert("Error deleting event");
+    }
+  };
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
@@ -49,31 +118,41 @@ export const Events = ({ data, loading, refreshData }) => {
     setSubmitting(true);
 
     try {
-      const result = await api.addEvent({
-        eventName,
-        date,
-        time,
-        venue,
-        type,
-        description
-      });
+      let result;
+      if (editingEventId) {
+        result = await api.updateEvent(data.events[0]?.chapterId || 'amity-tvm', editingEventId, {
+          "Event Name": eventName,
+          "Title": eventName,
+          date,
+          "Date": date,
+          time,
+          "Time": time,
+          venue,
+          "Venue": venue,
+          type,
+          "Type": type,
+          description,
+          "Description": description
+        });
+      } else {
+        result = await api.addEvent({
+          eventName,
+          date,
+          time,
+          venue,
+          type,
+          description
+        });
+      }
 
       if (result.success) {
-        // Reset form
-        setEventName('');
-        setDate('');
-        setTime('');
-        setVenue('');
-        setType('Meeting');
-        setDescription('');
-        setShowAddModal(false);
-        // Refresh global state
+        setShowEventModal(false);
         await refreshData();
       } else {
-        setError(result.error || 'Failed to create event');
+        setError(result.error || 'Failed to save event');
       }
     } catch (err) {
-      setError('Error creating event');
+      setError('Error saving event');
     } finally {
       setSubmitting(false);
     }
@@ -106,7 +185,7 @@ export const Events = ({ data, loading, refreshData }) => {
         </div>
         {canManageEvents && (
           <button 
-            onClick={() => setShowAddModal(true)} 
+            onClick={openAddModal} 
             className="btn btn-primary"
           >
             <Plus size={16} />
@@ -143,9 +222,17 @@ export const Events = ({ data, loading, refreshData }) => {
               <div className="event-details-meta">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                   <h3 className="event-title-text">{event["Event Name"]}</h3>
-                  <span className={`event-type-pill ${event["Type"] ? event["Type"].toLowerCase() : ''}`}>
-                    {event["Type"]}
-                  </span>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span className={`event-type-pill ${event["Type"] ? event["Type"].toLowerCase() : ''}`}>
+                      {event["Type"]}
+                    </span>
+                    {canManageEvents && event["Type"] !== "Birthday" && (
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button onClick={() => openEditModal(event)} className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }}>Edit</button>
+                        <button onClick={() => handleDeleteEvent(event["Event ID"])} className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--error)' }}>Delete</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="event-sub-meta">
@@ -153,14 +240,18 @@ export const Events = ({ data, loading, refreshData }) => {
                     <Calendar size={13} />
                     <span>{formatDisplayDate(event["Date"])}</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Clock size={13} />
-                    <span>{event["Time"]}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <MapPin size={13} />
-                    <span>{event["Venue"]}</span>
-                  </div>
+                  {event["Time"] && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Clock size={13} />
+                      <span>{event["Time"]}</span>
+                    </div>
+                  )}
+                  {event["Venue"] && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <MapPin size={13} />
+                      <span>{event["Venue"]}</span>
+                    </div>
+                  )}
                 </div>
 
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
@@ -177,17 +268,17 @@ export const Events = ({ data, loading, refreshData }) => {
         </div>
       )}
 
-      {/* ADD EVENT MODAL OVERLAY */}
-      {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+      {/* EVENT MODAL OVERLAY */}
+      {showEventModal && createPortal(
+        <div className="modal-overlay" onClick={() => setShowEventModal(false)} style={{ zIndex: 1000 }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="drawer-close" onClick={() => setShowAddModal(false)}>
+            <button className="drawer-close" onClick={() => setShowEventModal(false)}>
               <X size={24} />
             </button>
             
             <h2 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <PlusCircle size={24} style={{ color: 'var(--rotary-blue)' }} />
-              Schedule New Event
+              {editingEventId ? 'Edit Event' : 'Schedule New Event'}
             </h2>
 
             {error && (
@@ -275,11 +366,12 @@ export const Events = ({ data, loading, refreshData }) => {
                 style={{ width: '100%', padding: '12px', marginTop: '10px' }}
                 disabled={submitting}
               >
-                {submitting ? 'Creating...' : 'Add Event'}
+                {submitting ? 'Saving...' : (editingEventId ? 'Save Changes' : 'Add Event')}
               </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

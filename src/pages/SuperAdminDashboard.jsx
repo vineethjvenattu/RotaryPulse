@@ -2,14 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { Building2, Plus, ShieldAlert, Settings, X, Users } from 'lucide-react';
+import { Building2, Plus, ShieldAlert, Settings, X, Users, Megaphone, ExternalLink } from 'lucide-react';
 import { ChapterProfile } from './ChapterProfile';
 import { Avatar } from '../components/Avatar';
 
 export const SuperAdminDashboard = () => {
-  const { logout } = useAuth();
+  const { logout, globalConfig } = useAuth();
   const [chapters, setChapters] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // What's New State
+  const [whatsNewTitle, setWhatsNewTitle] = useState('');
+  const [whatsNewContent, setWhatsNewContent] = useState('');
+  const [publishing, setPublishing] = useState(false);
   
   // Create Chapter State
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -20,9 +25,14 @@ export const SuperAdminDashboard = () => {
   const [selectedChapterName, setSelectedChapterName] = useState('');
 
   // Global Roles State
-  const [showRolesModal, setShowRolesModal] = useState(false);
-  const [globalRolesString, setGlobalRolesString] = useState('');
-  const [savingRoles, setSavingRoles] = useState(false);
+  // Removed in favor of Global Config JSON
+
+  // Global Config State
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configJson, setConfigJson] = useState('');
+  const [devCodes, setDevCodes] = useState([]);
+  const [newDevCode, setNewDevCode] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
 
   useEffect(() => {
     loadChapters();
@@ -47,6 +57,23 @@ export const SuperAdminDashboard = () => {
     setLoading(false);
   };
 
+  const handlePublishWhatsNew = async (e) => {
+    e.preventDefault();
+    if (!whatsNewTitle || !whatsNewContent) return;
+    
+    setPublishing(true);
+    const result = await api.publishWhatsNew(whatsNewTitle, whatsNewContent);
+    setPublishing(false);
+    
+    if (result.success) {
+      alert("Published successfully to all users!");
+      setWhatsNewTitle('');
+      setWhatsNewContent('');
+    } else {
+      alert("Failed to publish: " + result.error);
+    }
+  };
+
   const handleCreateChapter = async () => {
     if (!newChapterName.trim()) return;
     const chapterId = newChapterName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -60,24 +87,71 @@ export const SuperAdminDashboard = () => {
     }
   };
 
-  const openGlobalRolesModal = async () => {
-    setShowRolesModal(true);
-    const res = await api.getGlobalRoles();
+
+
+  const openConfigModal = async () => {
+    setShowConfigModal(true);
+    const configRes = await api.getGlobalConfig();
+    if (configRes.success) {
+      setConfigJson(JSON.stringify(configRes.config, null, 2));
+    } else {
+      setConfigJson('{\n  "facebookPageId": "",\n  "fbAccessToken": ""\n}');
+    }
+    loadDevCodes();
+  };
+
+  const loadDevCodes = async () => {
+    const res = await api.getActiveDevCodes();
     if (res.success) {
-      setGlobalRolesString(res.roles.join(', '));
+      setDevCodes(res.codes);
     }
   };
 
-  const saveGlobalRoles = async () => {
-    setSavingRoles(true);
-    const rolesArray = globalRolesString.split(',').map(r => r.trim()).filter(r => r !== '');
-    const res = await api.saveGlobalRoles(rolesArray);
-    if (res.success) {
-      setShowRolesModal(false);
-    } else {
-      alert("Failed to save roles: " + res.error);
+  const handleSaveConfig = async () => {
+    setSavingConfig(true);
+    try {
+      const parsedConfig = JSON.parse(configJson);
+      const res = await api.saveGlobalConfig(parsedConfig);
+      if (res.success) {
+        alert("Global Config saved successfully.");
+      } else {
+        alert("Failed to save config: " + res.error);
+      }
+    } catch (e) {
+      alert("Invalid JSON format");
     }
-    setSavingRoles(false);
+    setSavingConfig(false);
+  };
+
+  const handleAddDevCode = async () => {
+    if (!newDevCode) return;
+    const res = await api.createDevCode(newDevCode);
+    if (res.success) {
+      setNewDevCode('');
+      loadDevCodes();
+    } else {
+      alert("Failed to create Dev Code: " + res.error);
+    }
+  };
+
+  const handleDeleteDevCode = async (code) => {
+    if (window.confirm(`Delete Dev Code ${code}?`)) {
+      const res = await api.deleteDevCode(code);
+      if (res.success) {
+        loadDevCodes();
+      } else {
+        alert("Failed to delete Dev Code: " + res.error);
+      }
+    }
+  };
+
+  const handleDevCodeLogin = async (code) => {
+    try {
+      logout();
+      window.location.href = `${window.location.origin}/?devCode=${code}`;
+    } catch (err) {
+      console.error("Failed to sign out for dev mode:", err);
+    }
   };
 
   if (loading) {
@@ -102,8 +176,8 @@ export const SuperAdminDashboard = () => {
           <ShieldAlert size={28} color="var(--rotary-gold)" /> Super Admin Panel
         </h2>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-          <button onClick={openGlobalRolesModal} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Settings size={16} /> Manage Roles
+          <button onClick={openConfigModal} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Settings size={16} /> Global Config
           </button>
           <button onClick={logout} className="btn btn-secondary" style={{ padding: '8px 16px', fontWeight: 600 }}>Logout</button>
         </div>
@@ -174,6 +248,54 @@ export const SuperAdminDashboard = () => {
         )}
       </div>
 
+      {/* WHAT'S NEW PUBLISHER */}
+      <div className="card" style={{ padding: '24px', marginBottom: '24px', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+          <div style={{ padding: '10px', backgroundColor: 'var(--success-light)', color: 'var(--success)', borderRadius: '12px' }}>
+            <Megaphone size={24} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Publish "What's New"</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '4px 0 0' }}>Send updates or release notes to all members globally.</p>
+          </div>
+        </div>
+        
+        <form onSubmit={handlePublishWhatsNew} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div>
+            <label className="form-label">Update Title</label>
+            <input 
+              type="text" 
+              className="form-control" 
+              placeholder="e.g. Version 1.2 Released" 
+              value={whatsNewTitle}
+              onChange={e => setWhatsNewTitle(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="form-label" style={{ marginBottom: '4px', display: 'block' }}>Update Content (Release Notes)</label>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', backgroundColor: 'var(--bg-tertiary)', padding: '8px', borderRadius: '6px' }}>
+              <strong>Formatting Guide (WhatsApp Style):</strong><br/>
+              • Use <code>*bold*</code> for <strong>bold</strong> text<br/>
+              • Use <code>_italic_</code> for <em>italic</em> text<br/>
+              • Use <code>~strikethrough~</code> for <del>strikethrough</del><br/>
+              • Each new line will automatically be rendered as a bullet point.
+            </div>
+            <textarea 
+              className="form-control" 
+              placeholder="Describe new features, bug fixes, or enhancements..." 
+              value={whatsNewContent}
+              onChange={e => setWhatsNewContent(e.target.value)}
+              style={{ height: '120px', resize: 'vertical' }}
+              required
+            />
+          </div>
+          <button type="submit" className="btn btn-primary" disabled={publishing}>
+            {publishing ? 'Publishing...' : 'Publish Update'}
+          </button>
+        </form>
+      </div>
+
       {/* CREATE CHAPTER MODAL */}
       {showCreateModal && createPortal(
         <div className="modal-overlay" style={{ zIndex: 300 }}>
@@ -199,32 +321,83 @@ export const SuperAdminDashboard = () => {
         document.body
       )}
 
-      {/* MANAGE GLOBAL ROLES MODAL */}
-      {showRolesModal && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 300 }}>
-          <div className="modal-content" style={{ maxWidth: '400px' }}>
-            <button className="drawer-close" onClick={() => setShowRolesModal(false)}><X size={24} /></button>
-            <h2 style={{ marginBottom: '8px', fontSize: '20px' }}>Global Chapter Roles</h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
-              Define the leadership roles that will appear on every chapter's profile page. Separate roles with a comma.
-            </p>
-            <div className="form-group" style={{ marginBottom: '24px' }}>
-              <label className="form-label">Roles (Comma Separated)</label>
+      {/* GLOBAL CONFIG MODAL */}
+      {showConfigModal && createPortal(
+        <div className="modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="modal-content" style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <button className="drawer-close" onClick={() => setShowConfigModal(false)}>
+              <X size={24} />
+            </button>
+            <h2 style={{ marginBottom: '16px', fontSize: '20px' }}>Global Configurations</h2>
+            
+            <div className="form-group">
+              <label className="form-label">Global Config JSON (e.g., FB Tokens)</label>
               <textarea 
-                className="form-input" 
-                rows={4}
-                value={globalRolesString} 
-                onChange={e => setGlobalRolesString(e.target.value)}
-                placeholder="President, Secretary, Treasurer..."
-                style={{ width: '100%', boxSizing: 'border-box', maxWidth: '100%', resize: 'vertical' }}
+                className="form-control"
+                style={{ height: '200px', fontFamily: 'monospace', fontSize: '13px' }}
+                value={configJson}
+                onChange={(e) => setConfigJson(e.target.value)}
               />
             </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowRolesModal(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={saveGlobalRoles} disabled={savingRoles}>
-                {savingRoles ? 'Saving...' : 'Save Roles'}
-              </button>
+            <button 
+              className="btn btn-primary" 
+              onClick={handleSaveConfig}
+              disabled={savingConfig}
+              style={{ width: '100%', marginBottom: '32px' }}
+            >
+              {savingConfig ? 'Saving...' : 'Save JSON Config'}
+            </button>
+
+            <h3 style={{ fontSize: '16px', marginBottom: '12px' }}>Development / Test Codes</h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+              Create codes to bypass mobile OTP during development. Valid for 24 hours.
+            </p>
+            
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <input 
+                type="text" 
+                className="form-control" 
+                placeholder="Enter new code (e.g., 999999)" 
+                value={newDevCode}
+                onChange={(e) => setNewDevCode(e.target.value)}
+              />
+              <button className="btn btn-primary" onClick={handleAddDevCode}>Add</button>
             </div>
+
+            {devCodes.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {devCodes.map(dc => (
+                  <div key={dc.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                    <div>
+                      <strong>{dc.code || dc.id}</strong>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        Expires: {dc.expiresAt ? new Date(dc.expiresAt).toLocaleString() : 'Unknown'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        onClick={() => handleDevCodeLogin(dc.code || dc.id)} 
+                        className="btn btn-secondary" 
+                        style={{ padding: '4px 8px', color: 'var(--rotary-blue)' }}
+                        title="Login as User with Dev Code"
+                      >
+                        <ExternalLink size={16} />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteDevCode(dc.id)} 
+                        className="btn btn-secondary" 
+                        style={{ padding: '4px 8px', color: '#e74c3c' }}
+                        title="Delete Dev Code"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No active dev codes.</p>
+            )}
           </div>
         </div>,
         document.body

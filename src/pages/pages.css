@@ -381,7 +381,7 @@
 
 .member-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   cursor: pointer;
 }
@@ -662,7 +662,7 @@
   bottom: 0;
   background-color: rgba(0,0,0,0.5);
   backdrop-filter: blur(4px);
-  z-index: 200;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1100,7 +1100,7 @@
     box-shadow: none !important;
     border-bottom: 1px solid var(--border-color) !important;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 16px;
     padding: 14px 16px !important;
     margin: 0 !important;
@@ -1115,23 +1115,29 @@
     transform: none !important;
     background-color: var(--bg-tertiary) !important;
   }
+}
 
-  /* Member Details Drawer Mockup 5 */
-  .drawer-overlay {
-    z-index: 200;
-  }
+/* Member Details Drawer Mockup 5 */
+.drawer-overlay {
+  z-index: 200;
+}
 
+@media (max-width: 767px) {
   .drawer-content {
     max-width: 100% !important;
     width: 100% !important;
     height: 100dvh !important;
-    padding: 0 !important;
-    background-color: #FFFFFF; /* Match white card so bottom space is seamless */
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
     animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
+}
+
+.drawer-content {
+  padding: 0 !important;
+  background-color: #FFFFFF; /* Match white card so bottom space is seamless */
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
 
   .drawer-top-bar {
     display: flex;
@@ -1148,13 +1154,30 @@
 
   .drawer-back-btn,
   .drawer-edit-btn {
-    background: none;
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
     border: none;
+    border-radius: 8px;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    padding: 6px 12px;
+    height: 36px;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.2s ease;
+  }
+
+  .drawer-back-btn:hover,
+  .drawer-edit-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  .drawer-back-btn {
     padding: 6px;
+    width: 36px;
   }
 
   .member-detail-header {
@@ -1271,14 +1294,11 @@
     font-weight: 500;
     color: #0F172A; /* Slate 900 value */
   }
-}
-
-
 
 /* Gallery Styles */
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   gap: 16px;
   padding-bottom: 32px;
 }
@@ -1336,3 +1356,35 @@
 }
 
 
+
+/* Feedback Widget */
+.feedback-btn-floating {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background-color: var(--rotary-blue);
+  color: white;
+  border: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 999;
+  transition: all 0.2s ease;
+}
+
+.feedback-btn-floating:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+}
+
+@media (max-width: 768px) {
+  .feedback-btn-floating {
+    bottom: calc(var(--bottom-nav-height, 65px) + 24px);
+    right: 16px;
+  }
+}
