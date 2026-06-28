@@ -28,6 +28,16 @@ export const AuthProvider = ({ children }) => {
         setApiChapterId(parsed.chapterId);
         // Ensure sessionStorage has the value for this tab
         sessionStorage.setItem("rc_user_session", JSON.stringify(parsed));
+        
+        // Background refresh to get the absolute latest fields (e.g. endorsements/badges)
+        api.getMember(parsed.chapterId, parsed["Member ID"] || parsed.id).then(res => {
+          if (res.success && res.data) {
+             const updated = { ...parsed, ...res.data };
+             setCurrentUser(updated);
+             sessionStorage.setItem("rc_user_session", JSON.stringify(updated));
+             localStorage.setItem("rc_user_session", JSON.stringify(updated));
+          }
+        });
       }
       setLoading(false);
     };

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Calendar, MapPin, Clock, Plus, X, PlusCircle } from 'lucide-react';
+import { Modal } from '../components/Modal';
 import './pages.css';
 
 export const Events = ({ data, loading, refreshData }) => {
@@ -269,110 +270,108 @@ export const Events = ({ data, loading, refreshData }) => {
       )}
 
       {/* EVENT MODAL OVERLAY */}
-      {showEventModal && createPortal(
-        <div className="modal-overlay" onClick={() => setShowEventModal(false)} style={{ zIndex: 1000 }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="drawer-close" onClick={() => setShowEventModal(false)}>
-              <X size={24} />
-            </button>
-            
-            <h2 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <PlusCircle size={24} style={{ color: 'var(--rotary-blue)' }} />
-              {editingEventId ? 'Edit Event' : 'Schedule New Event'}
-            </h2>
-
-            {error && (
-              <div className="login-error" style={{ marginBottom: '16px' }}>
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleFormSubmit}>
-              <div className="form-group">
-                <label className="form-label">Event / Meeting Name *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Weekly Club Assembly"
-                  value={eventName}
-                  onChange={(e) => setEventName(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-row-grid">
-                <div className="form-group">
-                  <label className="form-label">Date *</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Time *</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. 7:00 PM"
-                    value={time}
-                    onChange={(e) => setTime(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Venue *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Rotary Hall, Trivandrum"
-                  value={venue}
-                  onChange={(e) => setVenue(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Event Category</label>
-                <select
-                  className="form-control"
-                  value={type}
-                  onChange={(e) => setType(e.target.value)}
-                >
-                  <option value="Meeting">Meeting (Club Assembly)</option>
-                  <option value="Service">Service Project (Charity/Drive)</option>
-                  <option value="Social">Social Gathering (Party/District event)</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Description</label>
-                <textarea
-                  className="form-control"
-                  style={{ height: '80px', resize: 'none' }}
-                  placeholder="Provide meeting agendas or project details..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </div>
-
-              <button 
-                type="submit" 
-                className="btn btn-primary" 
-                style={{ width: '100%', padding: '12px', marginTop: '10px' }}
-                disabled={submitting}
-              >
-                {submitting ? 'Saving...' : (editingEventId ? 'Save Changes' : 'Add Event')}
-              </button>
-            </form>
+      <Modal
+        isOpen={showEventModal}
+        onClose={() => setShowEventModal(false)}
+        title={editingEventId ? 'Edit Event' : 'Schedule New Event'}
+        icon={<PlusCircle size={24} style={{ color: 'white' }} />}
+        footer={
+          <button 
+            type="submit" 
+            form="event-form"
+            className="btn btn-primary" 
+            style={{ width: '100%', padding: '12px' }}
+            disabled={submitting}
+          >
+            {submitting ? 'Saving...' : (editingEventId ? 'Save Changes' : 'Add Event')}
+          </button>
+        }
+      >
+        {error && (
+          <div className="login-error" style={{ marginBottom: '16px' }}>
+            <span>{error}</span>
           </div>
-        </div>,
-        document.body
-      )}
+        )}
+
+        <form id="event-form" onSubmit={handleFormSubmit}>
+          <div className="form-group" style={{ marginBottom: '16px' }}>
+            <label className="form-label">Event / Meeting Name *</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="e.g. Weekly Club Assembly"
+              value={eventName}
+              onChange={(e) => setEventName(e.target.value)}
+              required
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            />
+          </div>
+
+          <div className="form-row-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">Date *</label>
+              <input
+                type="date"
+                className="form-control"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">Time *</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. 7:00 PM"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                required
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: '16px' }}>
+            <label className="form-label">Venue *</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="e.g. Rotary Hall, Trivandrum"
+              value={venue}
+              onChange={(e) => setVenue(e.target.value)}
+              required
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            />
+          </div>
+
+          <div className="form-group" style={{ marginBottom: '16px' }}>
+            <label className="form-label">Event Category</label>
+            <select
+              className="form-control"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            >
+              <option value="Meeting">Meeting (Club Assembly)</option>
+              <option value="Service">Service Project (Charity/Drive)</option>
+              <option value="Social">Social Gathering (Party/District event)</option>
+            </select>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: '16px' }}>
+            <label className="form-label">Description</label>
+            <textarea
+              className="form-control"
+              style={{ height: '80px', resize: 'none', width: '100%', boxSizing: 'border-box' }}
+              placeholder="Provide meeting agendas or project details..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

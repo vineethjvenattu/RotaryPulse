@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Avatar } from '../components/Avatar';
 import { Check, X, Users, Search, AlertCircle, Save, QrCode } from 'lucide-react';
+import { Modal } from '../components/Modal';
 import './pages.css';
 
 export const Attendance = ({ data, loading, refreshData }) => {
@@ -279,40 +280,37 @@ export const Attendance = ({ data, loading, refreshData }) => {
           </>
         )}
       </div>
-      {showQrModal && selectedEvent && createPortal(
-        <div className="modal-overlay" onClick={() => setShowQrModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: '360px' }}>
-            <button className="drawer-close" onClick={() => setShowQrModal(false)}>
-              <X size={24} />
-            </button>
-            
-            <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>Event Check-in QR</h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{selectedEvent["Event Name"]}</p>
-            
-            <img 
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-                window.location.origin + window.location.pathname + `?action=checkin&eventId=${selectedEventId}`
-              )}`}
-              alt="Check-in QR Code"
-              style={{ display: 'block', margin: '24px auto', border: '8px solid white', borderRadius: '12px', boxShadow: 'var(--shadow-md)', width: '220px', height: '220px' }}
-            />
-            
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '20px' }}>
-              Ask members to scan this QR code with their phones to check-in instantly.
-            </p>
-            
-            <button 
-              type="button" 
-              className="btn btn-secondary" 
-              style={{ width: '100%' }}
-              onClick={() => setShowQrModal(false)}
-            >
-              Close
-            </button>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* QR MODAL */}
+      <Modal
+        isOpen={showQrModal && !!selectedEvent}
+        onClose={() => setShowQrModal(false)}
+        title="Event Check-in QR"
+        subtitle={selectedEvent?.["Event Name"]}
+        footer={
+          <button 
+            type="button" 
+            className="btn btn-secondary" 
+            style={{ width: '100%' }}
+            onClick={() => setShowQrModal(false)}
+          >
+            Close
+          </button>
+        }
+      >
+        <div style={{ textAlign: 'center' }}>
+          <img 
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
+              window.location.origin + window.location.pathname + `?action=checkin&eventId=${selectedEventId}`
+            )}`}
+            alt="Check-in QR Code"
+            style={{ display: 'block', margin: '24px auto', border: '8px solid white', borderRadius: '12px', boxShadow: 'var(--shadow-md)', width: '220px', height: '220px' }}
+          />
+          
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '20px' }}>
+            Ask members to scan this QR code with their phones to check-in instantly.
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 };

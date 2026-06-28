@@ -11,9 +11,11 @@ import { Payments } from './pages/Payments';
 import { Announcements } from './pages/Announcements';
 import { Profile } from './pages/Profile';
 import { Gallery } from './pages/Gallery';
+import { WhatsNew } from './pages/WhatsNew';
 import { MeetingConsole } from './pages/MeetingConsole';
 import { SuperAdminDashboard } from './pages/SuperAdminDashboard';
 import { InductLanding } from './pages/InductLanding';
+import { Feedbacks } from './pages/Feedbacks';
 import { Calendar, MapPin, Clock, X, Check, CheckSquare } from 'lucide-react';
 import './index.css';
 import logoImg from './assets/rotary-logo.png';
@@ -87,7 +89,7 @@ function AppContent() {
     const params = new URLSearchParams(window.location.search);
     const page = params.get('page') || params.get('tab');
     const stored = sessionStorage.getItem('rc_active_tab');
-    const validTabs = ['dashboard', 'members', 'events', 'attendance', 'payments', 'announcements', 'profile', 'gallery', 'meeting-console'];
+    const validTabs = ['dashboard', 'members', 'events', 'attendance', 'payments', 'announcements', 'profile', 'gallery', 'meeting-console', 'feedbacks', 'whatsnew'];
     if (page && validTabs.includes(page)) return page;
     if (stored && validTabs.includes(stored)) return stored;
     return 'dashboard';
@@ -315,6 +317,8 @@ function AppContent() {
       if (activeTab === 'dashboard') return <SuperAdminDashboard data={data} loading={loading} refreshData={refreshData} />;
       if (activeTab === 'profile') return <Profile />;
       if (activeTab === 'gallery') return <Gallery />;
+      if (activeTab === 'feedbacks') return <Feedbacks data={data} loading={loading} refreshData={refreshData} />;
+      if (activeTab === 'whatsnew') return <WhatsNew setActiveTab={setActiveTab} />;
       // Super Admin uses dashboard by default for other tabs, or we can add more admin tabs here later
       return <SuperAdminDashboard data={data} loading={loading} refreshData={refreshData} />;
     }
@@ -336,8 +340,12 @@ function AppContent() {
         return <Profile />;
       case 'gallery':
         return <Gallery />;
+      case 'feedbacks':
+        return <Feedbacks data={data} loading={loading} refreshData={refreshData} />;
       case 'meeting-console':
         return <MeetingConsole data={data} loading={loading} refreshData={refreshData} setActiveTab={setActiveTab} />;
+      case 'whatsnew':
+        return <WhatsNew setActiveTab={setActiveTab} />;
       default:
         return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} refreshData={refreshData} />;
     }

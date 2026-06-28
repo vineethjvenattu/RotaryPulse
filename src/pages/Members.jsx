@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Phone, MessageCircle, Mail, X, Info, ArrowLeft, Edit2, AlertCircle } from 'lucide-react';
+import { Search, Phone, MessageCircle, Mail, X, Info, ArrowLeft, Edit2, AlertCircle, Award } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import Papa from 'papaparse';
 import { Avatar } from '../components/Avatar';
+import { Modal } from '../components/Modal';
 import './pages.css';
 
 export const Members = ({ data, loading, refreshData }) => {
@@ -14,6 +15,7 @@ export const Members = ({ data, loading, refreshData }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [classificationFilter, setClassificationFilter] = useState('');
   const [bloodGroupFilter, setBloodGroupFilter] = useState('');
+  const [sortBy, setSortBy] = useState('name');
   const [selectedMember, setSelectedMember] = useState(null);
   
   const [showEditModal, setShowEditModal] = useState(false);
@@ -22,6 +24,12 @@ export const Members = ({ data, loading, refreshData }) => {
   const [pendingPayments, setPendingPayments] = useState([]);
   const [duesAction, setDuesAction] = useState('none');
   const [fetchingPayments, setFetchingPayments] = useState(false);
+
+  // Endorse State
+  const [showEndorseModal, setShowEndorseModal] = useState(false);
+  const [endorsing, setEndorsing] = useState(false);
+  const [endorseError, setEndorseError] = useState('');
+  const [endorseSuccess, setEndorseSuccess] = useState('');
 
   React.useEffect(() => {
     if (currentUser?.chapterId) {
@@ -72,7 +80,7 @@ export const Members = ({ data, loading, refreshData }) => {
     }
   };
 
-  const systemFields = ['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations'];
+  const systemFields = ['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations', 'badges', 'endorsements'];
   
   const standardFieldOrder = ["Gender", "Birthday", "Blood Group", "Spouse Name", "Email", "Address", "Profession", "Classification"];
   
@@ -114,6 +122,32 @@ export const Members = ({ data, loading, refreshData }) => {
     return value;
   };
 
+  const handleEndorseMember = async () => {
+    setEndorsing(true);
+    setEndorseError('');
+    setEndorseSuccess('');
+    
+    const res = await api.endorseMember(
+      currentUser.chapterId,
+      selectedMember["Member ID"] || selectedMember.id,
+      currentUser?.["Name"] || currentUser?.name || 'A Peer',
+      'team_player'
+    );
+    
+    setEndorsing(false);
+    
+    if (res.success) {
+      setEndorseSuccess('Member endorsed successfully!');
+      setTimeout(() => {
+        setShowEndorseModal(false);
+        setEndorseSuccess('');
+        refreshData && refreshData();
+      }, 1500);
+    } else {
+      setEndorseError(res.error || 'Failed to endorse member.');
+    }
+  };
+
   const { members = [] } = data;
 
   // Extract unique classifications and blood groups for filters
@@ -133,6 +167,16 @@ export const Members = ({ data, loading, refreshData }) => {
     
     return matchesSearch && matchesClassification && matchesBlood;
   });
+
+  if (sortBy === 'leaderboard') {
+    filteredMembers.sort((a, b) => {
+      const aBadges = a.badges ? a.badges.length : 0;
+      const bBadges = b.badges ? b.badges.length : 0;
+      return bBadges - aBadges || a["Name"].localeCompare(b["Name"]);
+    });
+  } else {
+    filteredMembers.sort((a, b) => a["Name"].localeCompare(b["Name"]));
+  }
 
   return (
     <div className="content-area animate-fade-in">
@@ -172,6 +216,15 @@ export const Members = ({ data, loading, refreshData }) => {
         >
           <option value="">All Blood Groups</option>
           {bloodGroups.map((bg, i) => <option key={i} value={bg}>{bg}</option>)}
+        </select>
+        
+        <select 
+          className="filter-select"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+        >
+          <option value="name">Sort by Name</option>
+          <option value="leaderboard">🏆 Leaderboard</option>
         </select>
       </div>
 
@@ -364,7 +417,7 @@ export const Members = ({ data, loading, refreshData }) => {
               
               {/* Dynamic Non-System Fields */}
               {Object.keys(selectedMember)
-                .filter(k => !['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations'].includes(k))
+                .filter(k => !systemFields.includes(k))
                 .sort(sortFields)
                 .map(field => (
                   <div className="detail-field-row" key={field}>
@@ -388,80 +441,175 @@ export const Members = ({ data, loading, refreshData }) => {
                   </div>
                 </div>
               )}
+
+              {/* Peer Badges & Endorsements */}
+              <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>Badges & Endorsements</h4>
+                  {selectedMember["Member ID"] !== currentUser["Member ID"] && (
+                    <button 
+                      className="btn btn-secondary" 
+                      style={{ padding: '4px 10px', fontSize: '12px', height: 'auto' }}
+                      onClick={() => setShowEndorseModal(true)}
+                    >
+                      + Endorse
+                    </button>
+                  )}
+                </div>
+                
+                {selectedMember.badges && selectedMember.badges.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                    {selectedMember.badges.map((badge, idx) => (
+                      <div key={idx} style={{ 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        alignItems: 'center', 
+                        background: '#ffffff', 
+                        border: '1px solid var(--border-color)', 
+                        padding: '12px', 
+                        borderRadius: '8px', 
+                        width: '80px', 
+                        textAlign: 'center'
+                      }}>
+                        {badge.image ? (
+                          <img 
+                            src={badge.image} 
+                            alt={badge.name} 
+                            style={{ width: '40px', height: '40px', marginBottom: '8px', objectFit: 'contain' }} 
+                          />
+                        ) : (
+                          <div style={{
+                            width: '40px', height: '40px', borderRadius: '50%', background: 'var(--rotary-gold)', 
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '8px'
+                          }}>
+                            <Award size={20} />
+                          </div>
+                        )}
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.2' }}>
+                          {badge.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>No badges earned yet.</p>
+                )}
+                
+                {/* Endorsements List */}
+                {selectedMember.endorsements && selectedMember.endorsements.length > 0 && (
+                  <div style={{ marginTop: '16px' }}>
+                    <h5 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Endorsements from Peers</h5>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {selectedMember.endorsements.map((endors, idx) => (
+                        <div key={idx} style={{ background: 'var(--bg-tertiary)', padding: '8px 12px', borderRadius: '6px', fontSize: '12px' }}>
+                          <span style={{ fontWeight: 600 }}>{typeof endors.endorserName === 'object' ? 'A Peer' : (endors.endorserName || 'A Peer')}</span> endorsed for <span style={{ fontWeight: 600, color: 'var(--rotary-blue)' }}>Team Player</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>,
         document.body
       )}
+
+      {/* ENDORSE MODAL */}
+      <Modal
+        isOpen={showEndorseModal && !!selectedMember}
+        onClose={() => setShowEndorseModal(false)}
+        title="Endorse Member"
+        subtitle={selectedMember?.["Name"]}
+      >
+        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+          Would you like to endorse <strong>{selectedMember?.["Name"]}</strong> as a Team Player?
+        </p>
+
+        {endorseError && <p className="error" style={{ marginBottom: '16px', fontSize: '13px', color: 'var(--error)' }}>{endorseError}</p>}
+        {endorseSuccess && <p className="success" style={{ marginBottom: '16px', fontSize: '13px', color: 'green' }}>{endorseSuccess}</p>}
+
+        <button 
+          className="btn btn-primary" 
+          style={{ width: '100%', marginBottom: '10px' }} 
+          onClick={handleEndorseMember}
+          disabled={endorsing || endorseSuccess}
+        >
+          {endorsing ? 'Endorsing...' : 'Endorse as Team Player'}
+        </button>
+        <button 
+          className="btn btn-secondary" 
+          style={{ width: '100%' }} 
+          onClick={() => setShowEndorseModal(false)}
+        >
+          Cancel
+        </button>
+      </Modal>
 
       {/* EDIT MODAL (President Only) */}
-      {showEditModal && selectedMember && createPortal(
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3>Manage Member</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>{selectedMember["Name"]}</p>
-            
-            <div className="form-group" style={{ marginBottom: '20px' }}>
-              <label>Role</label>
-              <select className="input-field" value={editRole} onChange={(e) => setEditRole(e.target.value)}>
-                <option value="Member">Member</option>
-                {globalRoles.map(r => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
+      <Modal
+        isOpen={showEditModal && !!selectedMember}
+        onClose={() => setShowEditModal(false)}
+        title="Manage Member"
+        subtitle={selectedMember?.["Name"]}
+      >
+        <div className="form-group" style={{ marginBottom: '20px' }}>
+          <label>Role</label>
+          <select className="input-field" value={editRole} onChange={(e) => setEditRole(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }}>
+            <option value="Member">Member</option>
+            {globalRoles.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </div>
+        
+        <button className="btn btn-primary" style={{ width: '100%', marginBottom: '30px' }} onClick={handleRoleChange}>
+          Update Role
+        </button>
+
+        <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '20px 0' }} />
+
+        <h4 style={{ color: '#ef4444', marginBottom: '10px' }}>Propose Deletion</h4>
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+          Requires 2 additional core member approvals to delete/orphan this member.
+        </p>
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <textarea 
+            className="input-field" 
+            placeholder="Reason for deletion..." 
+            rows="3"
+            value={deletionNotes}
+            onChange={(e) => setDeletionNotes(e.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box' }}
+          />
+        </div>
+
+        {fetchingPayments ? (
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Checking pending dues...</p>
+        ) : pendingPayments.length > 0 ? (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
+            <h4 style={{ color: 'var(--error)', margin: '0 0 8px 0', fontSize: '14px' }}>Pending Dues Detected ({pendingPayments.length})</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <input type="radio" name="dues" checked={duesAction === 'cleared'} onChange={() => setDuesAction('cleared')} />
+                Confirm dues cleared externally
+              </label>
+              <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <input type="radio" name="dues" checked={duesAction === 'waiver_requested'} onChange={() => setDuesAction('waiver_requested')} />
+                Request dues waiver from approvers
+              </label>
             </div>
-            
-            <button className="btn btn-primary" style={{ width: '100%', marginBottom: '30px' }} onClick={handleRoleChange}>
-              Update Role
-            </button>
-
-            <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '20px 0' }} />
-
-            <h4 style={{ color: '#ef4444', marginBottom: '10px' }}>Propose Deletion</h4>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
-              Requires 2 additional core member approvals to delete/orphan this member.
-            </p>
-            <div className="form-group">
-              <textarea 
-                className="input-field" 
-                placeholder="Reason for deletion..." 
-                rows="3"
-                value={deletionNotes}
-                onChange={(e) => setDeletionNotes(e.target.value)}
-              />
-            </div>
-
-            {fetchingPayments ? (
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Checking pending dues...</p>
-            ) : pendingPayments.length > 0 ? (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-                <h4 style={{ color: 'var(--error)', margin: '0 0 8px 0', fontSize: '14px' }}>Pending Dues Detected ({pendingPayments.length})</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                    <input type="radio" name="dues" checked={duesAction === 'cleared'} onChange={() => setDuesAction('cleared')} />
-                    Confirm dues cleared externally
-                  </label>
-                  <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                    <input type="radio" name="dues" checked={duesAction === 'waiver_requested'} onChange={() => setDuesAction('waiver_requested')} />
-                    Request dues waiver from approvers
-                  </label>
-                </div>
-              </div>
-            ) : (
-              <p style={{ color: 'var(--success)', margin: '0 0 16px 0', fontSize: '13px', fontWeight: 'bold' }}>No pending dues. Safe to remove.</p>
-            )}
-
-            <button className="btn" style={{ width: '100%', background: '#ef4444', color: 'white', marginTop: '10px' }} onClick={handleProposeDeletion}>
-              Submit Deletion Request
-            </button>
-
-            <button className="btn btn-secondary" style={{ width: '100%', marginTop: '20px' }} onClick={() => setShowEditModal(false)}>
-              Cancel
-            </button>
           </div>
-        </div>,
-        document.body
-      )}
+        ) : null}
+
+        <button className="btn" style={{ width: '100%', background: '#ef4444', color: 'white', marginTop: '10px', padding: '12px', border: 'none', borderRadius: '6px' }} onClick={handleProposeDeletion}>
+          Submit Deletion Request
+        </button>
+
+        <button className="btn btn-secondary" style={{ width: '100%', marginTop: '20px' }} onClick={() => setShowEditModal(false)}>
+          Cancel
+        </button>
+      </Modal>
     </div>
   );
 };

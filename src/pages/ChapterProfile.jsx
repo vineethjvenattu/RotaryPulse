@@ -5,6 +5,7 @@ import Papa from 'papaparse';
 import { Avatar } from '../components/Avatar';
 import { Users, Upload, Download, ArrowLeft, UserCircle, Save, Plus, X } from 'lucide-react';
 import { getTagColor } from '../utils/tagColors';
+import { Modal } from '../components/Modal';
 import './pages.css';
 
 export function ChapterProfile({ chapterId, chapterName, onBack }) {
@@ -614,128 +615,125 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
       )}
 
       {/* ASSIGN ROLE MODAL */}
-      {assigningRole && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 300 }}>
-          <div className="modal-content" style={{ maxWidth: '400px' }}>
-            <button className="drawer-close" onClick={() => setAssigningRole(null)}><X size={24} /></button>
-            <h2 style={{ marginBottom: '8px', fontSize: '20px' }}>Assign {assigningRole}</h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
-              Select a member from this chapter to assign to the role of <strong>{assigningRole}</strong>. 
-              If they hold another role, they will be replaced.
-            </p>
-
-            <div className="form-group" style={{ marginBottom: '24px' }}>
-              <label className="form-label">Select Member</label>
-              <select 
-                className="form-input" 
-                value={selectedMemberId} 
-                onChange={(e) => setSelectedMemberId(e.target.value)}
-                style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', textOverflow: 'ellipsis' }}
-              >
-                <option value="">-- Select Member --</option>
-                {members.map(m => (
-                  <option key={m["Member ID"]} value={m["Member ID"]}>
-                    {m.Name} (Rotary ID: {m["Rotary ID"] || "N/A"})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setAssigningRole(null)}>Cancel</button>
-              <button 
-                className="btn btn-primary" 
-                style={{ flex: 1 }} 
-                onClick={handleAssignRole}
-                disabled={!selectedMemberId}
-              >
-                Assign Role
-              </button>
-            </div>
+      {/* ASSIGN ROLE MODAL */}
+      <Modal
+        isOpen={!!assigningRole}
+        onClose={() => setAssigningRole(null)}
+        title={`Assign ${assigningRole}`}
+        footer={
+          <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setAssigningRole(null)}>Cancel</button>
+            <button 
+              className="btn btn-primary" 
+              style={{ flex: 1 }} 
+              onClick={handleAssignRole}
+              disabled={!selectedMemberId}
+            >
+              Assign Role
+            </button>
           </div>
-        </div>,
-        document.body
-      )}
+        }
+      >
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+          Select a member from this chapter to assign to the role of <strong>{assigningRole}</strong>. 
+          If they hold another role, they will be replaced.
+        </p>
+
+        <div className="form-group" style={{ marginBottom: '24px' }}>
+          <label className="form-label">Select Member</label>
+          <select 
+            className="form-input" 
+            value={selectedMemberId} 
+            onChange={(e) => setSelectedMemberId(e.target.value)}
+            style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', textOverflow: 'ellipsis' }}
+          >
+            <option value="">-- Select Member --</option>
+            {members.map(m => (
+              <option key={m["Member ID"]} value={m["Member ID"]}>
+                {m.Name} (Rotary ID: {m["Rotary ID"] || "N/A"})
+              </option>
+            ))}
+          </select>
+        </div>
+      </Modal>
 
       {/* ASSIGN DESIGNATIONS MODAL */}
-      {assigningDesignationsMember && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 300 }}>
-          <div className="modal-content" style={{ maxWidth: '500px' }}>
-            <button className="drawer-close" onClick={() => setAssigningDesignationsMember(null)}><X size={24} /></button>
-            <h2 style={{ marginBottom: '8px', fontSize: '20px' }}>Designations</h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
-              Assign tags/designations to <strong>{assigningDesignationsMember.Name}</strong>.
-            </p>
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '24px' }}>
-              {globalDesignations.map(desig => {
-                const isSelected = selectedDesignations.includes(desig);
-                const tagColor = getTagColor(desig);
-                return (
-                  <button 
-                    key={desig}
-                    onClick={() => {
-                      if (selectedDesignations.includes(desig)) {
-                        setSelectedDesignations(selectedDesignations.filter(d => d !== desig));
-                      } else {
-                        setSelectedDesignations([...selectedDesignations, desig]);
-                      }
-                    }}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '16px',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      border: isSelected ? `1px solid ${tagColor.bg}` : '1px solid var(--border-color)',
-                      backgroundColor: isSelected ? tagColor.bg : 'transparent',
-                      color: isSelected ? tagColor.text : 'var(--text-secondary)',
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    {desig}
-                  </button>
-                );
-              })}
-              {globalDesignations.length === 0 && (
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No designations configured in Global Settings.</p>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setAssigningDesignationsMember(null)}>Cancel</button>
-              <button 
-                className="btn btn-primary" 
-                style={{ flex: 1 }} 
-                onClick={handleAssignDesignations}
-                disabled={savingDesignations}
-              >
-                {savingDesignations ? 'Saving...' : 'Save Designations'}
-              </button>
-            </div>
+      {/* ASSIGN DESIGNATIONS MODAL */}
+      <Modal
+        isOpen={!!assigningDesignationsMember}
+        onClose={() => setAssigningDesignationsMember(null)}
+        title="Designations"
+        footer={
+          <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setAssigningDesignationsMember(null)}>Cancel</button>
+            <button 
+              className="btn btn-primary" 
+              style={{ flex: 1 }} 
+              onClick={handleAssignDesignations}
+              disabled={savingDesignations}
+            >
+              {savingDesignations ? 'Saving...' : 'Save Designations'}
+            </button>
           </div>
-        </div>,
-        document.body
-      )}
+        }
+      >
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+          Assign tags/designations to <strong>{assigningDesignationsMember?.Name}</strong>.
+        </p>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '24px' }}>
+          {globalDesignations.map(desig => {
+            const isSelected = selectedDesignations.includes(desig);
+            const tagColor = getTagColor(desig);
+            return (
+              <button 
+                key={desig}
+                onClick={() => {
+                  if (selectedDesignations.includes(desig)) {
+                    setSelectedDesignations(selectedDesignations.filter(d => d !== desig));
+                  } else {
+                    setSelectedDesignations([...selectedDesignations, desig]);
+                  }
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '16px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: isSelected ? `1px solid ${tagColor.bg}` : '1px solid var(--border-color)',
+                  backgroundColor: isSelected ? tagColor.bg : 'transparent',
+                  color: isSelected ? tagColor.text : 'var(--text-secondary)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {desig}
+              </button>
+            );
+          })}
+          {globalDesignations.length === 0 && (
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No designations configured in Global Settings.</p>
+          )}
+        </div>
+      </Modal>
 
       {/* REMOVAL MODAL */}
-      {removingMember && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 300 }}>
-          <div className="modal-content" style={{ maxWidth: '400px' }}>
-            <button className="drawer-close" onClick={() => setRemovingMember(null)}><X size={24} /></button>
-            <h2 style={{ marginBottom: '8px', fontSize: '20px', color: '#ef4444' }}>Remove Member</h2>
-            <p style={{ fontSize: '14px', marginBottom: '24px' }}>Are you sure you want to remove <strong>{removingMember.Name}</strong>? This will permanently delete the member immediately without requiring approvals.</p>
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setRemovingMember(null)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1, background: '#ef4444', border: 'none', color: 'white' }} onClick={handleDirectRemoval} disabled={removing}>
-                {removing ? 'Removing...' : 'Remove Immediately'}
-              </button>
-            </div>
+      {/* REMOVAL MODAL */}
+      <Modal
+        isOpen={!!removingMember}
+        onClose={() => setRemovingMember(null)}
+        title="Remove Member"
+        footer={
+          <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setRemovingMember(null)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1, background: '#ef4444', border: 'none', color: 'white' }} onClick={handleDirectRemoval} disabled={removing}>
+              {removing ? 'Removing...' : 'Remove Immediately'}
+            </button>
           </div>
-        </div>,
-        document.body
-      )}
+        }
+      >
+        <p style={{ fontSize: '14px', marginBottom: '24px' }}>Are you sure you want to remove <strong>{removingMember?.Name}</strong>? This will permanently delete the member immediately without requiring approvals.</p>
+      </Modal>
 
     </div>
   );

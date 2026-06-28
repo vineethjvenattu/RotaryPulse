@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Avatar } from '../components/Avatar';
+import { Modal } from '../components/Modal';
 import { 
   Calendar, 
   MapPin, 
@@ -21,12 +22,14 @@ import {
   Check,
   Beer,
   Heart,
-  X
+  X,
+  ThumbsUp
 } from 'lucide-react';
 import './pages.css';
 
 export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const { currentUser, canMarkAttendance, isPresident, isSecretary, isTreasurer } = useAuth();
+  const isPST = isPresident || isSecretary || isTreasurer;
   const [projectionTab, setProjectionTab] = useState('finance');
   
   const [pendingMembers, setPendingMembers] = useState([]);
@@ -214,12 +217,37 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
 
   myTasks = [...myTasks, ...approvalTasks];
 
+  const myOpinionActions = opinions
+    .filter(o => {
+      if (o["Action Required"] !== 'Yes') return false;
+      const isAssignee = String(o["Action Assignee"]).trim() === currentUserId;
+      const status = o["Action Status"] || 'Pending';
+      
+      if (status === 'Completed') return false;
+      
+      if (isAssignee) return true;
+      if (isPST) return true;
+      
+      return false;
+    })
+    .map(o => ({
+      "Task ID": `opinion_${o["Opinion ID"]}`,
+      "Title": o["Action Details"] || o["Opinion Text"],
+      "Target Date": o["Meeting Date"] || "TBD",
+      "Status": o["Action Status"] || "Pending",
+      "isOpinionAction": true,
+      "originalOpinion": o,
+      "isAssignee": String(o["Action Assignee"]).trim() === currentUserId
+    }));
+  
+  myTasks = [...myTasks, ...myOpinionActions];
+
   // 3. Meeting Projection Data
   const currentMeetingId = nextEvent?.["Event ID"] || "";
   const meetingPayments = payments.filter(p => p["Event ID"] === currentMeetingId && p["Status"] === "Paid");
   const meetingTasks = tasks.filter(t => t["Event ID"] === currentMeetingId);
   const meetingMinutes = data.minutes?.find(m => m["Event ID"] === currentMeetingId);
-  const meetingOpinions = opinions.filter(o => o["Event ID"] === currentMeetingId);
+  const meetingOpinions = opinions.filter(o => o["Event ID"] === currentMeetingId && !o.isNewAction && !(o["Opinion Text"] && o["Opinion Text"].startsWith("[Action Item]")));
   const meetingProjectNotes = projectNotes.filter(pn => pn["Event ID"] === currentMeetingId);
 
   const myPendingDues = payments
@@ -388,6 +416,48 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       await refreshData();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleToggleOpinionAction = async (opinion, isAssignee) => {
+    try {
+      const currentStatus = opinion["Action Status"] || 'Pending';
+      let newStatus = currentStatus;
+
+      if (currentStatus === 'Pending' && isAssignee) {
+        newStatus = 'Awaiting PST Approval';
+      } else if (currentStatus === 'Awaiting PST Approval' && isPST) {
+        newStatus = 'Completed';
+      } else {
+        return; // No valid action
+      }
+
+      await api.updateOpinionStatus(opinion["Opinion ID"], newStatus);
+      await refreshData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRejectOpinionAction = async (opinion, e) => {
+    e.stopPropagation();
+    try {
+      if (isPST) {
+        await api.updateOpinionStatus(opinion["Opinion ID"], "Pending");
+        await refreshData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleVoteOpinion = async (opinionId) => {
+    if (!currentUser?.chapterId || !currentUser?.["Member ID"]) return;
+    try {
+      await api.voteOpinion(currentUser.chapterId, opinionId, currentUser["Member ID"]);
+      await refreshData();
+    } catch (err) {
+      console.error("Voting error:", err);
     }
   };
 
@@ -877,6 +947,27 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                                 {o["Action Details"]}
                               </div>
                             )}
+                            <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', marginTop: '8px' }}>
+                              <button 
+                                onClick={() => handleVoteOpinion(o["Opinion ID"])}
+                                style={{ 
+                                  background: 'transparent', 
+                                  border: '1px solid var(--border-color)', 
+                                  borderRadius: '20px', 
+                                  padding: '2px 8px', 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: '6px',
+                                  fontSize: '11px',
+                                  cursor: 'pointer',
+                                  color: (o.votes || []).includes(currentUser?.["Member ID"]) ? 'var(--primary)' : 'var(--text-secondary)',
+                                  borderColor: (o.votes || []).includes(currentUser?.["Member ID"]) ? 'var(--primary)' : 'var(--border-color)'
+                                }}
+                              >
+                                <ThumbsUp size={12} /> 
+                                {(o.votes || []).length > 0 ? (o.votes || []).length : 'Vote'}
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1036,25 +1127,63 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                   {myTasks.map(task => (
                     <div 
                       key={task["Task ID"]}
-                      onClick={() => {
-                        if (task.isApproval) {
-                          setActiveTab('payments');
-                        } else {
-                          handleToggleTask(task["Task ID"], task["Status"]);
-                        }
-                      }}
-                      style={{ display: 'flex', gap: '8px', padding: '10px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--border-radius-sm)', cursor: 'pointer', alignItems: 'flex-start' }}
+                      style={{ display: 'flex', gap: '8px', padding: '10px', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--border-radius-sm)', alignItems: 'flex-start' }}
                     >
-                      <input 
-                        type="checkbox" 
-                        checked={false} 
-                        readOnly 
-                        style={{ marginTop: '3px', cursor: 'pointer' }}
-                      />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '12px', fontWeight: 600 }}>{task["Title"]}</div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                          Due: {task["Target Date"]}
+                        <div style={{ fontSize: '12px', fontWeight: 600, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                          {task["Title"]}
+                          {task.Status === 'Completed' && (
+                            <span style={{ fontSize: '10px', color: '#15803d', backgroundColor: '#dcfce7', padding: '2px 6px', borderRadius: '10px' }}>
+                              Completed
+                            </span>
+                          )}
+                          {(!task.Status || task.Status === 'Pending') && (
+                            <span style={{ fontSize: '10px', color: '#4b5563', backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '10px' }}>
+                              Pending
+                            </span>
+                          )}
+                          {task.Status === 'Awaiting PST Approval' && (
+                            <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: '10px' }}>
+                              Awaiting Approval
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                          {task["Target Date"]} 
+                          {task.originalMeetingDate && ` (Meeting: ${task.originalMeetingDate})`}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                          {task.isApproval ? (
+                            <button onClick={() => setActiveTab('payments')} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--rotary-blue)' }}>
+                              Go to Payments
+                            </button>
+                          ) : task.isOpinionAction ? (
+                            <>
+                              {(!task["Status"] || task["Status"] === 'Pending') && task.isAssignee && (
+                                <button onClick={() => handleToggleOpinionAction(task.originalOpinion, task.isAssignee)} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>
+                                  Mark Complete
+                                </button>
+                              )}
+                              {task["Status"] === 'Awaiting PST Approval' && isPST && (
+                                <>
+                                  <button onClick={() => handleToggleOpinionAction(task.originalOpinion, task.isAssignee)} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>
+                                    Approve
+                                  </button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleRejectOpinionAction(task.originalOpinion, e); }} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {task["Status"] !== 'Completed' && (
+                                <button onClick={() => handleToggleTask(task["Task ID"], task["Status"])} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>
+                                  Mark Complete
+                                </button>
+                              )}
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1115,126 +1244,110 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       </div>
 
       {/* OPINION SUBMISSION MODAL */}
-      {showOpinionModal && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 1000 }}>
-          <div className="modal-content" style={{ maxWidth: '450px', position: 'relative', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-            <button 
-              className="drawer-close" 
-              onClick={() => setShowOpinionModal(false)}
-              style={{ position: 'absolute', right: '16px', top: '16px', border: 'none', background: 'transparent', cursor: 'pointer' }}
-            >
-              <X size={24} />
-            </button>
-            
-            <h2 style={{ fontSize: '18px', marginBottom: '16px', color: 'var(--rotary-blue-dark)', fontFamily: 'var(--font-title)', fontWeight: 700 }}>
-              {(isPresident || isSecretary) ? "Capture Member Point/Opinion" : "Raise a Point / Opinion"}
-            </h2>
+      <Modal
+        isOpen={showOpinionModal}
+        onClose={() => setShowOpinionModal(false)}
+        title={(isPresident || isSecretary) ? "Capture Member Point/Opinion" : "Raise a Point / Opinion"}
+      >
+        {opinionError && (
+          <div className="login-error" style={{ marginBottom: '16px' }}>
+            <span>{opinionError}</span>
+          </div>
+        )}
 
-            {opinionError && (
-              <div className="login-error" style={{ marginBottom: '16px' }}>
-                <span>{opinionError}</span>
+        <form onSubmit={handleSaveOpinion}>
+          {/* Member Selection (Admins only) */}
+          {(isPresident || isSecretary) ? (
+            <div className="form-group">
+              <label className="form-label">On Behalf of Member</label>
+              <select 
+                className="form-control"
+                value={opinionMemberId}
+                onChange={(e) => setOpinionMemberId(e.target.value)}
+              >
+                <option value="">-- Select Member --</option>
+                {members.map(m => (
+                  <option key={m["Member ID"]} value={m["Member ID"]}>{m["Name"]}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="form-group">
+              <label className="form-label">Raising as</label>
+              <input 
+                type="text" 
+                className="form-control" 
+                value={currentUser?.["Name"]} 
+                disabled 
+                style={{ backgroundColor: 'var(--bg-tertiary)' }}
+              />
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Point / Opinion Details</label>
+            <textarea 
+              className="form-control"
+              rows={4}
+              placeholder="Type the point, opinion or suggestion raised..."
+              value={opinionText}
+              onChange={(e) => setOpinionText(e.target.value)}
+              required
+              style={{ resize: 'vertical' }}
+            />
+          </div>
+
+          {/* Action Required Toggles (Admins only) */}
+          {(isPresident || isSecretary) && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Action Required?</label>
+                <select 
+                  className="form-control"
+                  value={opinionActionRequired}
+                  onChange={(e) => setOpinionActionRequired(e.target.value)}
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
               </div>
-            )}
 
-            <form onSubmit={handleSaveOpinion}>
-              {/* Member Selection (Admins only) */}
-              {(isPresident || isSecretary) ? (
-                <div className="form-group" style={{ textAlign: 'left' }}>
-                  <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '6px' }}>On Behalf of Member</label>
-                  <select 
-                    className="form-control"
-                    value={opinionMemberId}
-                    onChange={(e) => setOpinionMemberId(e.target.value)}
-                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none' }}
-                  >
-                    <option value="">-- Select Member --</option>
-                    {members.map(m => (
-                      <option key={m["Member ID"]} value={m["Member ID"]}>{m["Name"]}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div className="form-group" style={{ textAlign: 'left' }}>
-                  <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '6px' }}>Raising as</label>
+              {opinionActionRequired === 'Yes' && (
+                <div className="form-group">
+                  <label className="form-label">Action Details / Assignment</label>
                   <input 
                     type="text" 
-                    className="form-control" 
-                    value={currentUser?.["Name"]} 
-                    disabled 
-                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-tertiary)' }}
+                    className="form-control"
+                    placeholder="e.g. Action: Review feasibility in the next board meet"
+                    value={opinionActionDetails}
+                    onChange={(e) => setOpinionActionDetails(e.target.value)}
                   />
                 </div>
               )}
+            </>
+          )}
 
-              <div className="form-group" style={{ textAlign: 'left', marginTop: '16px' }}>
-                <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '6px' }}>Point / Opinion Details</label>
-                <textarea 
-                  className="form-control"
-                  rows={4}
-                  placeholder="Type the point, opinion or suggestion raised..."
-                  value={opinionText}
-                  onChange={(e) => setOpinionText(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none', resize: 'vertical' }}
-                />
-              </div>
-
-              {/* Action Required Toggles (Admins only) */}
-              {(isPresident || isSecretary) && (
-                <>
-                  <div className="form-group" style={{ textAlign: 'left', marginTop: '16px' }}>
-                    <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '6px' }}>Action Required?</label>
-                    <select 
-                      className="form-control"
-                      value={opinionActionRequired}
-                      onChange={(e) => setOpinionActionRequired(e.target.value)}
-                      style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none' }}
-                    >
-                      <option value="No">No</option>
-                      <option value="Yes">Yes</option>
-                    </select>
-                  </div>
-
-                  {opinionActionRequired === 'Yes' && (
-                    <div className="form-group" style={{ textAlign: 'left', marginTop: '16px' }}>
-                      <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '6px' }}>Action Details / Assignment</label>
-                      <input 
-                        type="text" 
-                        className="form-control"
-                        placeholder="e.g. Action: Review feasibility in the next board meet"
-                        value={opinionActionDetails}
-                        onChange={(e) => setOpinionActionDetails(e.target.value)}
-                        style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none' }}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-
-              <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ flex: 1, padding: '10px', cursor: 'pointer' }}
-                  onClick={() => setShowOpinionModal(false)}
-                  disabled={savingOpinion}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ flex: 1, padding: '10px', cursor: 'pointer' }}
-                  disabled={savingOpinion}
-                >
-                  {savingOpinion ? 'Saving...' : 'Submit Point'}
-                </button>
-              </div>
-            </form>
+          <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ flex: 1 }}
+              onClick={() => setShowOpinionModal(false)}
+              disabled={savingOpinion}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={savingOpinion}
+            >
+              {savingOpinion ? 'Saving...' : 'Submit Point'}
+            </button>
           </div>
-        </div>,
-        document.body
-      )}
+        </form>
+      </Modal>
 
       {/* WHAT'S NEW SECTION */}
       {whatsNew && whatsNew.length > 0 && (

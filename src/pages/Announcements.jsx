@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { Bell, Plus, X, User } from 'lucide-react';
+import { Modal } from '../components/Modal';
 import './pages.css';
 
 export const Announcements = ({ data, loading, refreshData }) => {
@@ -106,62 +107,54 @@ export const Announcements = ({ data, loading, refreshData }) => {
       )}
 
       {/* POST ANNOUNCEMENT MODAL OVERLAY */}
-      {showAddModal && createPortal(
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)} style={{ zIndex: 1000 }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="drawer-close" onClick={() => setShowAddModal(false)}>
-              <X size={24} />
-            </button>
-            
-            <h2 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Bell size={22} style={{ color: 'var(--rotary-blue)' }} />
-              Publish Announcement
-            </h2>
-
-            {error && (
-              <div className="login-error" style={{ marginBottom: '16px' }}>
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleFormSubmit}>
-              <div className="form-group">
-                <label className="form-label">Notice Title *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Tree Plantation Drive Details"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Announcement Content *</label>
-                <textarea
-                  className="form-control"
-                  style={{ height: '140px', resize: 'none' }}
-                  placeholder="Write the official notice details here..."
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  required
-                />
-              </div>
-
-              <button 
-                type="submit" 
-                className="btn btn-primary" 
-                style={{ width: '100%', padding: '12px', marginTop: '10px' }}
-                disabled={submitting}
-              >
-                {submitting ? 'Publishing...' : 'Publish Announcement'}
-              </button>
-            </form>
+      {/* ADD MODAL */}
+      <Modal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="Publish Announcement"
+        icon={<Bell size={22} style={{ color: 'var(--rotary-blue)' }} />}
+      >
+        {error && (
+          <div className="login-error" style={{ marginBottom: '16px' }}>
+            <span>{error}</span>
           </div>
-        </div>,
-        document.body
-      )}
+        )}
+
+        <form onSubmit={handleFormSubmit}>
+          <div className="form-group">
+            <label className="form-label">Notice Title *</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="e.g. Tree Plantation Drive Details"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Announcement Content *</label>
+            <textarea
+              className="form-control"
+              style={{ height: '140px', resize: 'none' }}
+              placeholder="Write the official notice details here..."
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              required
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            className="btn btn-primary" 
+            style={{ width: '100%', padding: '12px', marginTop: '10px' }}
+            disabled={submitting}
+          >
+            {submitting ? 'Publishing...' : 'Publish Announcement'}
+          </button>
+        </form>
+      </Modal>
     </div>
   );
 };

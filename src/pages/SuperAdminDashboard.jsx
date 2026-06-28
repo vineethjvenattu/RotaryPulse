@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { Building2, Plus, ShieldAlert, Settings, X, Users, Megaphone, ExternalLink } from 'lucide-react';
 import { ChapterProfile } from './ChapterProfile';
 import { Avatar } from '../components/Avatar';
+import { Modal } from '../components/Modal';
 
 export const SuperAdminDashboard = () => {
   const { logout, globalConfig } = useAuth();
@@ -297,111 +298,106 @@ export const SuperAdminDashboard = () => {
       </div>
 
       {/* CREATE CHAPTER MODAL */}
-      {showCreateModal && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 300 }}>
-          <div className="modal-content" style={{ maxWidth: '400px' }}>
-            <button className="drawer-close" onClick={() => setShowCreateModal(false)}><X size={24} /></button>
-            <h2 style={{ marginBottom: '16px', fontSize: '20px' }}>Create New Chapter</h2>
-            <div className="form-group" style={{ marginBottom: '24px' }}>
-              <label className="form-label">Chapter Name</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                placeholder="e.g. Rotary Club of Trivandrum"
-                value={newChapterName} 
-                onChange={e => setNewChapterName(e.target.value)}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCreateModal(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleCreateChapter}>Create Chapter</button>
-            </div>
+      {/* CREATE CHAPTER MODAL */}
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        title="Create New Chapter"
+        footer={
+          <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCreateModal(false)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleCreateChapter}>Create Chapter</button>
           </div>
-        </div>,
-        document.body
-      )}
+        }
+      >
+        <div className="form-group" style={{ marginBottom: '24px' }}>
+          <label className="form-label">Chapter Name</label>
+          <input 
+            type="text" 
+            className="form-input" 
+            placeholder="e.g. Rotary Club of Trivandrum"
+            value={newChapterName} 
+            onChange={e => setNewChapterName(e.target.value)}
+          />
+        </div>
+      </Modal>
 
       {/* GLOBAL CONFIG MODAL */}
-      {showConfigModal && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 1000 }}>
-          <div className="modal-content" style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-            <button className="drawer-close" onClick={() => setShowConfigModal(false)}>
-              <X size={24} />
-            </button>
-            <h2 style={{ marginBottom: '16px', fontSize: '20px' }}>Global Configurations</h2>
-            
-            <div className="form-group">
-              <label className="form-label">Global Config JSON (e.g., FB Tokens)</label>
-              <textarea 
-                className="form-control"
-                style={{ height: '200px', fontFamily: 'monospace', fontSize: '13px' }}
-                value={configJson}
-                onChange={(e) => setConfigJson(e.target.value)}
-              />
-            </div>
-            <button 
-              className="btn btn-primary" 
-              onClick={handleSaveConfig}
-              disabled={savingConfig}
-              style={{ width: '100%', marginBottom: '32px' }}
-            >
-              {savingConfig ? 'Saving...' : 'Save JSON Config'}
-            </button>
+      {/* GLOBAL CONFIG MODAL */}
+      <Modal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        title="Global Configurations"
+      >
+        <div className="form-group">
+          <label className="form-label">Global Config JSON (e.g., FB Tokens)</label>
+          <textarea 
+            className="form-control"
+            style={{ height: '200px', fontFamily: 'monospace', fontSize: '13px', width: '100%', boxSizing: 'border-box' }}
+            value={configJson}
+            onChange={(e) => setConfigJson(e.target.value)}
+          />
+        </div>
+        <button 
+          className="btn btn-primary" 
+          onClick={handleSaveConfig}
+          disabled={savingConfig}
+          style={{ width: '100%', marginBottom: '32px' }}
+        >
+          {savingConfig ? 'Saving...' : 'Save JSON Config'}
+        </button>
 
-            <h3 style={{ fontSize: '16px', marginBottom: '12px' }}>Development / Test Codes</h3>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              Create codes to bypass mobile OTP during development. Valid for 24 hours.
-            </p>
-            
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-              <input 
-                type="text" 
-                className="form-control" 
-                placeholder="Enter new code (e.g., 999999)" 
-                value={newDevCode}
-                onChange={(e) => setNewDevCode(e.target.value)}
-              />
-              <button className="btn btn-primary" onClick={handleAddDevCode}>Add</button>
-            </div>
+        <h3 style={{ fontSize: '16px', marginBottom: '12px' }}>Development / Test Codes</h3>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+          Create codes to bypass mobile OTP during development. Valid for 24 hours.
+        </p>
+        
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <input 
+            type="text" 
+            className="form-control" 
+            placeholder="Enter new code (e.g., 999999)" 
+            value={newDevCode}
+            onChange={(e) => setNewDevCode(e.target.value)}
+          />
+          <button className="btn btn-primary" onClick={handleAddDevCode}>Add</button>
+        </div>
 
-            {devCodes.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {devCodes.map(dc => (
-                  <div key={dc.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
-                    <div>
-                      <strong>{dc.code || dc.id}</strong>
-                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        Expires: {dc.expiresAt ? new Date(dc.expiresAt).toLocaleString() : 'Unknown'}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button 
-                        onClick={() => handleDevCodeLogin(dc.code || dc.id)} 
-                        className="btn btn-secondary" 
-                        style={{ padding: '4px 8px', color: 'var(--rotary-blue)' }}
-                        title="Login as User with Dev Code"
-                      >
-                        <ExternalLink size={16} />
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteDevCode(dc.id)} 
-                        className="btn btn-secondary" 
-                        style={{ padding: '4px 8px', color: '#e74c3c' }}
-                        title="Delete Dev Code"
-                      >
-                        Delete
-                      </button>
-                    </div>
+        {devCodes.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {devCodes.map(dc => (
+              <div key={dc.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+                <div>
+                  <strong>{dc.code || dc.id}</strong>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    Expires: {dc.expiresAt ? new Date(dc.expiresAt).toLocaleString() : 'Unknown'}
                   </div>
-                ))}
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button 
+                    onClick={() => handleDevCodeLogin(dc.code || dc.id)} 
+                    className="btn btn-secondary" 
+                    style={{ padding: '4px 8px', color: 'var(--rotary-blue)' }}
+                    title="Login as User with Dev Code"
+                  >
+                    <ExternalLink size={16} />
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteDevCode(dc.id)} 
+                    className="btn btn-secondary" 
+                    style={{ padding: '4px 8px', color: '#e74c3c' }}
+                    title="Delete Dev Code"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-            ) : (
-              <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No active dev codes.</p>
-            )}
+            ))}
           </div>
-        </div>,
-        document.body
-      )}
+        ) : (
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No active dev codes.</p>
+        )}
+      </Modal>
     </div>
   );
 };

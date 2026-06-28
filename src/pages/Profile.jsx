@@ -7,6 +7,7 @@ import { api } from '../services/api';
 import { seedFirebaseDatabase } from '../services/firebaseSeeder';
 import { User, Users, Phone, Mail, Award, Calendar, Link, Settings, Database, LogOut, Activity, X, Camera, Edit2 } from 'lucide-react';
 import { Avatar } from '../components/Avatar';
+import { Modal } from '../components/Modal';
 import { getTagColor } from '../utils/tagColors';
 import './pages.css';
 
@@ -607,6 +608,73 @@ export const Profile = () => {
           </div>
         </div>
 
+        {/* Badges / Trophy Case */}
+        <div className="card">
+          <div className="card-title">
+            <Award size={18} style={{ color: 'var(--rotary-blue)' }} />
+            Trophy Case
+          </div>
+          <div style={{ padding: '16px' }}>
+            {currentUser.badges && currentUser.badges.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
+                {currentUser.badges.map((badge, idx) => (
+                  <div key={idx} style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center', 
+                    background: '#ffffff', 
+                    border: '1px solid var(--border-color)', 
+                    padding: '16px', 
+                    borderRadius: '12px', 
+                    minWidth: '120px', 
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                    textAlign: 'center'
+                  }}>
+                    {badge.image ? (
+                      <img 
+                        src={badge.image} 
+                        alt={badge.name} 
+                        style={{ width: '64px', height: '64px', marginBottom: '12px', objectFit: 'contain' }} 
+                      />
+                    ) : (
+                      <div style={{
+                        width: '64px', height: '64px', borderRadius: '50%', background: 'var(--rotary-gold)', 
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '12px'
+                      }}>
+                        <Award size={32} />
+                      </div>
+                    )}
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', marginBottom: '4px' }}>
+                      {badge.name}
+                    </div>
+                    {badge.description && (
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                        {badge.description}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>No badges earned yet. Participate in events and activities to earn badges!</p>
+            )}
+
+            {/* Endorsements List */}
+            {currentUser.endorsements && currentUser.endorsements.length > 0 && (
+              <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                <h5 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>Endorsements from Peers</h5>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {currentUser.endorsements.map((endors, idx) => (
+                    <div key={idx} style={{ background: 'var(--bg-tertiary)', padding: '12px 16px', borderRadius: '8px', fontSize: '13px' }}>
+                      <span style={{ fontWeight: 600 }}>{typeof endors.endorserName === 'object' ? 'A Peer' : (endors.endorserName || 'A Peer')}</span> endorsed you for <span style={{ fontWeight: 600, color: 'var(--rotary-blue)' }}>Team Player</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* My Activities Card */}
         <div className="card">
           <div className="card-title">
@@ -642,156 +710,135 @@ export const Profile = () => {
       </div>
 
       {/* Add Family Member Modal */}
-      {showFamilyModal && createPortal(
-        <div style={{ zIndex: 9999, display: 'flex', flexDirection: 'column', backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }} onClick={() => setShowFamilyModal(false)}>
-          <div className="animate-slide-up" style={{ 
-            backgroundColor: 'white', 
-            borderTopLeftRadius: '24px', 
-            borderTopRightRadius: '24px', 
-            width: '100%', 
-            maxWidth: '500px', 
-            margin: 'auto auto 0 auto',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '0 -10px 40px rgba(0,0,0,0.15)',
-            position: 'relative',
-            overflow: 'hidden'
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ backgroundColor: 'var(--rotary-blue)', padding: '24px', position: 'relative', flexShrink: 0 }}>
-              <div style={{ width: '48px', height: '5px', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: '10px', margin: '0 auto 16px' }}></div>
-              <button style={{ position: 'absolute', top: '24px', right: '24px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: '4px' }} onClick={() => setShowFamilyModal(false)}><X size={20} /></button>
-              <h2 style={{ marginBottom: '4px', fontSize: '22px', fontWeight: 700, color: 'white' }}>Add Family Member</h2>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.8)', margin: 0 }}>Link a spouse or child to your profile.</p>
-            </div>
-            
-            <div style={{ overflowY: 'auto', padding: '24px', flexGrow: 1 }}>
-
-            <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
-              <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                <input type="radio" checked={linkMode === 'manual'} onChange={() => { setLinkMode('manual'); setSelectedMemberId(''); setMemberSearchQuery(''); }} /> Add Manually
-              </label>
-              <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                <input type="radio" checked={linkMode === 'existing'} onChange={() => { setLinkMode('existing'); setMemberSearchQuery(''); }} /> Link Existing Member
-              </label>
-            </div>
-
-            {linkMode === 'existing' && (
-              <div className="form-group" style={{ marginBottom: '16px', position: 'relative' }}>
-                <label className="form-label">Select Platform Member</label>
-                <input 
-                  type="text" 
-                  className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} 
-                  placeholder="Type to search members..." 
-                  value={memberSearchQuery}
-                  onChange={e => {
-                    setMemberSearchQuery(e.target.value);
-                    setShowMemberDropdown(true);
-                    if (!e.target.value) {
-                      handleSelectExisting('');
-                    }
-                  }}
-                  onFocus={() => setShowMemberDropdown(true)}
-                />
-                {showMemberDropdown && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', zIndex: 10, maxHeight: '200px', overflowY: 'auto', boxShadow: 'var(--shadow-md)', marginTop: '4px' }}>
-                    {filteredMembers.slice(0, 50).map(m => (
-                      <div 
-                        key={m.id} 
-                        style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', background: selectedMemberId === m.id ? '#f1f5f9' : 'white' }}
-                        onClick={() => {
-                          handleSelectExisting(m.id);
-                          setMemberSearchQuery(m.name);
-                          setShowMemberDropdown(false);
-                        }}
-                      >
-                        <div style={{ fontWeight: 500, fontSize: '14px', color: '#0F172A' }}>
-                          {m.name}
-                          <span style={{ fontSize: '10px', backgroundColor: '#e2e8f0', color: '#475569', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px', verticalAlign: 'middle' }}>
-                            {m.type}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{m.subtitle}</div>
-                      </div>
-                    ))}
-                    {filteredMembers.length === 0 && (
-                      <div style={{ padding: '8px 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>No members found</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="form-group" style={{ marginBottom: '16px' }}>
-              <label className="form-label">Name</label>
-              {linkMode === 'existing' && selectedMemberId ? (
-                <div className="form-input" style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', color: '#64748b', display: 'flex', alignItems: 'center' }}>
-                  {selectedMemberData?.["Name"] || familyForm.name}
-                </div>
-              ) : (
-                <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.name} onChange={e => setFamilyForm({...familyForm, name: e.target.value})} placeholder="John Doe" />
-              )}
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '16px' }}>
-              <label className="form-label">Relation</label>
-              <select className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.relation} onChange={e => setFamilyForm({...familyForm, relation: e.target.value})}>
-                <option value="">-- Select --</option>
-                <option value="Spouse">Spouse</option>
-                <option value="Child">Child</option>
-                <option value="Parent">Parent</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '16px' }}>
-              <label className="form-label">Birthday (Optional)</label>
-              {hasOriginalBirthday ? (
-                <div className="form-input" style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', color: '#64748b', display: 'flex', alignItems: 'center' }}>
-                  {(() => {
-                    const dateStr = selectedMemberData["Birthday"];
-                    const d = new Date(dateStr);
-                    if (!isNaN(d.getTime())) {
-                      return `${String(d.getDate()).padStart(2, '0')}-${d.toLocaleString('en-US', { month: 'short' })}-XXXX`;
-                    }
-                    const parts = String(dateStr).split('-');
-                    if (parts.length === 3) return `${parts[0]}-${parts[1]}-XXXX`;
-                    return "***";
-                  })()}
-                </div>
-              ) : (
-                <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.birthday} onChange={e => setFamilyForm({...familyForm, birthday: e.target.value})} />
-              )}
-            </div>
-
-            <div className="form-group" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" checked={familyForm.isRotarian} onChange={e => setFamilyForm({...familyForm, isRotarian: e.target.checked})} id="isRot" disabled={linkMode === 'existing' && !!selectedMemberId} />
-              <label htmlFor="isRot" style={{ fontSize: '14px' }}>Is this person a Rotarian?</label>
-            </div>
-
-            {familyForm.isRotarian && (
-              <div className="form-group" style={{ marginBottom: '24px' }}>
-                <label className="form-label">Rotary ID (Optional)</label>
-                {hasOriginalRotaryId ? (
-                  <div className="form-input" style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', color: '#64748b', display: 'flex', alignItems: 'center' }}>
-                    {selectedMemberData["Rotary ID"]}
-                  </div>
-                ) : (
-                  <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.rotaryId} onChange={e => setFamilyForm({...familyForm, rotaryId: e.target.value})} placeholder="1234567" />
-                )}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowFamilyModal(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveFamilyMember} disabled={savingFamily}>
-                {savingFamily ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-            </div>
-          </div>
+      <Modal
+        isOpen={showFamilyModal}
+        onClose={() => setShowFamilyModal(false)}
+        title="Add Family Member"
+        subtitle="Link a spouse or child to your profile."
+        footer={
+          <>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowFamilyModal(false)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveFamilyMember} disabled={savingFamily}>
+              {savingFamily ? 'Saving...' : 'Save'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+          <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <input type="radio" checked={linkMode === 'manual'} onChange={() => { setLinkMode('manual'); setSelectedMemberId(''); setMemberSearchQuery(''); }} /> Add Manually
+          </label>
+          <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <input type="radio" checked={linkMode === 'existing'} onChange={() => { setLinkMode('existing'); setMemberSearchQuery(''); }} /> Link Existing Member
+          </label>
         </div>
-      , document.getElementById('root') || document.body)}
+
+        {linkMode === 'existing' && (
+          <div className="form-group" style={{ marginBottom: '16px', position: 'relative' }}>
+            <label className="form-label">Select Platform Member</label>
+            <input 
+              type="text" 
+              className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} 
+              placeholder="Type to search members..." 
+              value={memberSearchQuery}
+              onChange={e => {
+                setMemberSearchQuery(e.target.value);
+                setShowMemberDropdown(true);
+                if (!e.target.value) {
+                  handleSelectExisting('');
+                }
+              }}
+              onFocus={() => setShowMemberDropdown(true)}
+            />
+            {showMemberDropdown && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', zIndex: 10, maxHeight: '200px', overflowY: 'auto', boxShadow: 'var(--shadow-md)', marginTop: '4px' }}>
+                {filteredMembers.slice(0, 50).map(m => (
+                  <div 
+                    key={m.id} 
+                    style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', background: selectedMemberId === m.id ? '#f1f5f9' : 'white' }}
+                    onClick={() => {
+                      handleSelectExisting(m.id);
+                      setMemberSearchQuery(m.name);
+                      setShowMemberDropdown(false);
+                    }}
+                  >
+                    <div style={{ fontWeight: 500, fontSize: '14px', color: '#0F172A' }}>
+                      {m.name}
+                      <span style={{ fontSize: '10px', backgroundColor: '#e2e8f0', color: '#475569', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px', verticalAlign: 'middle' }}>
+                        {m.type}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{m.subtitle}</div>
+                  </div>
+                ))}
+                {filteredMembers.length === 0 && (
+                  <div style={{ padding: '8px 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>No members found</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Name</label>
+          {linkMode === 'existing' && selectedMemberId ? (
+            <div className="form-input" style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', color: '#64748b', display: 'flex', alignItems: 'center' }}>
+              {selectedMemberData?.["Name"] || familyForm.name}
+            </div>
+          ) : (
+            <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.name} onChange={e => setFamilyForm({...familyForm, name: e.target.value})} placeholder="John Doe" />
+          )}
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Relation</label>
+          <select className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.relation} onChange={e => setFamilyForm({...familyForm, relation: e.target.value})}>
+            <option value="">-- Select --</option>
+            <option value="Spouse">Spouse</option>
+            <option value="Child">Child</option>
+            <option value="Parent">Parent</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Birthday (Optional)</label>
+          {hasOriginalBirthday ? (
+            <div className="form-input" style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', color: '#64748b', display: 'flex', alignItems: 'center' }}>
+              {(() => {
+                const dateStr = selectedMemberData["Birthday"];
+                const d = new Date(dateStr);
+                if (!isNaN(d.getTime())) {
+                  return `${String(d.getDate()).padStart(2, '0')}-${d.toLocaleString('en-US', { month: 'short' })}-XXXX`;
+                }
+                const parts = String(dateStr).split('-');
+                if (parts.length === 3) return `${parts[0]}-${parts[1]}-XXXX`;
+                return "***";
+              })()}
+            </div>
+          ) : (
+            <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.birthday} onChange={e => setFamilyForm({...familyForm, birthday: e.target.value})} />
+          )}
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <input type="checkbox" checked={familyForm.isRotarian} onChange={e => setFamilyForm({...familyForm, isRotarian: e.target.checked})} id="isRot" disabled={linkMode === 'existing' && !!selectedMemberId} />
+          <label htmlFor="isRot" style={{ fontSize: '14px' }}>Is this person a Rotarian?</label>
+        </div>
+
+        {familyForm.isRotarian && (
+          <div className="form-group" style={{ marginBottom: '24px' }}>
+            <label className="form-label">Rotary ID (Optional)</label>
+            {hasOriginalRotaryId ? (
+              <div className="form-input" style={{ width: '100%', boxSizing: 'border-box', background: '#f8fafc', color: '#64748b', display: 'flex', alignItems: 'center' }}>
+                {selectedMemberData["Rotary ID"]}
+              </div>
+            ) : (
+              <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={familyForm.rotaryId} onChange={e => setFamilyForm({...familyForm, rotaryId: e.target.value})} placeholder="1234567" />
+            )}
+          </div>
+        )}
+      </Modal>
       {/* Cropper Modal */}
       {showCropper && createPortal(
         <div style={{ zIndex: 10000, display: 'flex', flexDirection: 'column', backgroundColor: 'rgba(0,0,0,0.8)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
@@ -832,187 +879,139 @@ export const Profile = () => {
       , document.getElementById('root') || document.body)}
 
 
-      {/* Change PIN Modal */}
-      {showPinModal && createPortal(
-        <div style={{ zIndex: 9999, display: 'flex', flexDirection: 'column', backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }} onClick={() => setShowPinModal(false)}>
-          <div className="animate-slide-up" style={{ 
-            backgroundColor: 'white', 
-            borderTopLeftRadius: '24px', 
-            borderTopRightRadius: '24px', 
-            width: '100%', 
-            maxWidth: '500px', 
-            margin: 'auto auto 0 auto',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '0 -10px 40px rgba(0,0,0,0.15)',
-            position: 'relative',
-            overflow: 'hidden'
-          }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ backgroundColor: 'var(--rotary-blue)', padding: '24px', position: 'relative', flexShrink: 0 }}>
-              <div style={{ width: '48px', height: '5px', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: '10px', margin: '0 auto 16px' }}></div>
-              <button style={{ position: 'absolute', top: '24px', right: '24px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: '4px' }} onClick={() => setShowPinModal(false)}><X size={20} /></button>
-              <h2 style={{ marginBottom: '4px', fontSize: '22px', fontWeight: 700, color: 'white' }}>Change PIN</h2>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.8)', margin: 0 }}>Securely update your login PIN.</p>
-            </div>
-            
-            <div style={{ overflowY: 'auto', padding: '24px', flexGrow: 1 }}>
-              {pinError && <div style={{ color: 'var(--error)', backgroundColor: 'var(--error-light)', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px' }}>{pinError}</div>}
-              {pinSuccess && <div style={{ color: 'var(--success)', backgroundColor: 'rgba(34, 197, 94, 0.1)', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px' }}>{pinSuccess}</div>}
-              
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>Current PIN</label>
-                <input 
-                  type="password" 
-                  value={oldPin} 
-                  onChange={(e) => setOldPin(e.target.value)}
-                  maxLength={4}
-                  style={{ width: '100%', padding: '10px 14px', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                />
-              </div>
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>New PIN</label>
-                <input 
-                  type="password" 
-                  value={newPin} 
-                  onChange={(e) => setNewPin(e.target.value)}
-                  maxLength={4}
-                  style={{ width: '100%', padding: '10px 14px', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                />
-              </div>
-              <div className="form-group" style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>Confirm New PIN</label>
-                <input 
-                  type="password" 
-                  value={confirmNewPin} 
-                  onChange={(e) => setConfirmNewPin(e.target.value)}
-                  maxLength={4}
-                  style={{ width: '100%', padding: '10px 14px', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                />
-              </div>
 
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button 
-                  onClick={() => setShowPinModal(false)}
-                  style={{ flex: 1, padding: '12px', background: 'var(--bg-tertiary)', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleChangePin}
-                  disabled={changingPin || !oldPin || !newPin || !confirmNewPin}
-                  style={{ flex: 1, padding: '12px', background: 'var(--rotary-blue)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, opacity: (changingPin || !oldPin || !newPin || !confirmNewPin) ? 0.6 : 1 }}
-                >
-                  {changingPin ? 'Updating...' : 'Update PIN'}
-                </button>
-              </div>
-            </div>
-          </div>
+      <Modal
+        isOpen={showPinModal}
+        onClose={() => setShowPinModal(false)}
+        title="Change PIN"
+        subtitle="Set a new secure PIN for your account."
+        footer={
+          <>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowPinModal(false)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleChangePin} disabled={changingPin}>
+              {changingPin ? 'Updating...' : 'Change PIN'}
+            </button>
+          </>
+        }
+      >
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Current PIN</label>
+          <input 
+            type="password" 
+            className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} 
+            value={oldPin} 
+            onChange={e => setOldPin(e.target.value)} 
+            placeholder="Enter current PIN"
+            maxLength={6}
+          />
         </div>
-      , document.getElementById('root') || document.body)}
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">New PIN</label>
+          <input 
+            type="password" 
+            className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} 
+            value={newPin} 
+            onChange={e => setNewPin(e.target.value)} 
+            placeholder="Enter new 6-digit PIN"
+            maxLength={6}
+          />
+        </div>
+        <div className="form-group" style={{ marginBottom: '24px' }}>
+          <label className="form-label">Confirm New PIN</label>
+          <input 
+            type="password" 
+            className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} 
+            value={confirmNewPin} 
+            onChange={e => setConfirmNewPin(e.target.value)} 
+            placeholder="Confirm new 6-digit PIN"
+            maxLength={6}
+          />
+        </div>
+        {pinError && <p style={{ color: 'var(--error)', fontSize: '14px', marginBottom: '16px', textAlign: 'center' }}>{pinError}</p>}
+        {pinSuccess && <p style={{ color: 'var(--success)', fontSize: '14px', marginBottom: '16px', textAlign: 'center' }}>{pinSuccess}</p>}
+      </Modal>
 
       {/* Edit Profile Modal */}
-      {showEditProfileModal && createPortal(
-        <div style={{ zIndex: 9999, display: 'flex', flexDirection: 'column', backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }} onClick={() => setShowEditProfileModal(false)}>
-          <div className="animate-slide-up" style={{ 
-            backgroundColor: 'white', 
-            borderTopLeftRadius: '24px', 
-            borderTopRightRadius: '24px', 
-            width: '100%', 
-            maxWidth: '500px', 
-            margin: 'auto auto 0 auto',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '0 -10px 40px rgba(0,0,0,0.15)',
-            position: 'relative',
-            overflow: 'hidden'
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ backgroundColor: 'var(--rotary-blue)', padding: '24px', position: 'relative', flexShrink: 0 }}>
-              <div style={{ width: '48px', height: '5px', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: '10px', margin: '0 auto 16px' }}></div>
-              <button style={{ position: 'absolute', top: '24px', right: '24px', background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: '4px' }} onClick={() => setShowEditProfileModal(false)}><X size={20} /></button>
-              <h2 style={{ marginBottom: '4px', fontSize: '22px', fontWeight: 700, color: 'white' }}>Edit Profile</h2>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.8)', margin: 0 }}>Update your personal details and avatar.</p>
-            </div>
-            
-            <div style={{ overflowY: 'auto', padding: '24px', flexGrow: 1 }}>
-              <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#334155', marginBottom: '12px' }}>Profile Picture</h3>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
-                  <Avatar member={currentUser} size={64} />
-                  <div>
-                    <input type="file" id="avatarUpload" style={{ display: 'none' }} accept="image/*" onChange={handleFileChange} />
-                    <label htmlFor="avatarUpload" className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', padding: '8px 16px' }}>
-                      <Camera size={14} />
-                      Choose Image
-                    </label>
-                  </div>
-                </div>
-
-                
-                <h4 style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>Or choose a unique generated avatar:</h4>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', maxHeight: '140px', overflowY: 'auto', padding: '8px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  {availableAvatars.map(av => (
-                    <img 
-                      key={av.id} 
-                      src={av.url} 
-                      alt="Avatar Option" 
-                      style={{ width: '48px', height: '48px', borderRadius: '50%', cursor: 'pointer', border: '2px solid transparent' }} 
-                      onClick={() => handleSelectAvatar(av.id, av.url)}
-                      onMouseOver={e => e.target.style.borderColor = 'var(--rotary-blue)'}
-                      onMouseOut={e => e.target.style.borderColor = 'transparent'}
-                    />
-                  ))}
-                  {availableAvatars.length === 0 && <div style={{ fontSize: '12px', color: '#94a3b8' }}>Loading avatars...</div>}
-                </div>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label">Mobile Number</label>
-                <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Mobile} onChange={e => setEditProfileForm({...editProfileForm, Mobile: e.target.value})} />
-              </div>
-              
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label">Email ID</label>
-                <input type="email" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Email} onChange={e => setEditProfileForm({...editProfileForm, Email: e.target.value})} />
-              </div>
-              
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label">Blood Group</label>
-                <select className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm["Blood Group"]} onChange={e => setEditProfileForm({...editProfileForm, "Blood Group": e.target.value})}>
-                  <option value="">-- Select --</option>
-                  <option value="A+">A+</option>
-                  <option value="A-">A-</option>
-                  <option value="B+">B+</option>
-                  <option value="B-">B-</option>
-                  <option value="AB+">AB+</option>
-                  <option value="AB-">AB-</option>
-                  <option value="O+">O+</option>
-                  <option value="O-">O-</option>
-                </select>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label">Birthday</label>
-                <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Birthday} onChange={e => setEditProfileForm({...editProfileForm, Birthday: e.target.value})} />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: '24px' }}>
-                <label className="form-label">Anniversary</label>
-                <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Anniversary} onChange={e => setEditProfileForm({...editProfileForm, Anniversary: e.target.value})} />
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowEditProfileModal(false)}>Cancel</button>
-                <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveProfile} disabled={savingProfile}>
-                  {savingProfile ? 'Saving...' : 'Save Profile'}
-                </button>
-              </div>
+      <Modal
+        isOpen={showEditProfileModal}
+        onClose={() => setShowEditProfileModal(false)}
+        title="Edit Profile"
+        subtitle="Update your personal details and avatar."
+        footer={
+          <>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowEditProfileModal(false)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveProfile} disabled={savingProfile}>
+              {savingProfile ? 'Saving...' : 'Save Profile'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ marginBottom: '24px' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#334155', marginBottom: '12px' }}>Profile Picture</h3>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+            <Avatar member={currentUser} size={64} />
+            <div>
+              <input type="file" id="avatarUpload" style={{ display: 'none' }} accept="image/*" onChange={handleFileChange} />
+              <label htmlFor="avatarUpload" className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', padding: '8px 16px' }}>
+                <Camera size={14} />
+                Choose Image
+              </label>
             </div>
           </div>
+
+          <h4 style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>Or choose a unique generated avatar:</h4>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', maxHeight: '140px', overflowY: 'auto', padding: '8px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            {availableAvatars.map(av => (
+              <img 
+                key={av.id} 
+                src={av.url} 
+                alt="Avatar Option" 
+                style={{ width: '48px', height: '48px', borderRadius: '50%', cursor: 'pointer', border: '2px solid transparent' }} 
+                onClick={() => handleSelectAvatar(av.id, av.url)}
+                onMouseOver={e => e.target.style.borderColor = 'var(--rotary-blue)'}
+                onMouseOut={e => e.target.style.borderColor = 'transparent'}
+              />
+            ))}
+            {availableAvatars.length === 0 && <div style={{ fontSize: '12px', color: '#94a3b8' }}>Loading avatars...</div>}
+          </div>
         </div>
-      , document.getElementById('root') || document.body)}
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Mobile Number</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Mobile} onChange={e => setEditProfileForm({...editProfileForm, Mobile: e.target.value})} />
+        </div>
+        
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Email ID</label>
+          <input type="email" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Email} onChange={e => setEditProfileForm({...editProfileForm, Email: e.target.value})} />
+        </div>
+        
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Blood Group</label>
+          <select className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm["Blood Group"]} onChange={e => setEditProfileForm({...editProfileForm, "Blood Group": e.target.value})}>
+            <option value="">-- Select --</option>
+            <option value="A+">A+</option>
+            <option value="A-">A-</option>
+            <option value="B+">B+</option>
+            <option value="B-">B-</option>
+            <option value="AB+">AB+</option>
+            <option value="AB-">AB-</option>
+            <option value="O+">O+</option>
+            <option value="O-">O-</option>
+          </select>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Birthday</label>
+          <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Birthday} onChange={e => setEditProfileForm({...editProfileForm, Birthday: e.target.value})} />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '24px' }}>
+          <label className="form-label">Anniversary</label>
+          <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Anniversary} onChange={e => setEditProfileForm({...editProfileForm, Anniversary: e.target.value})} />
+        </div>
+      </Modal>
 
     </div>
   );

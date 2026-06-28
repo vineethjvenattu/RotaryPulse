@@ -7,6 +7,7 @@ import {
   Plus, Users, Calendar, CheckSquare, Square, Pencil, ThumbsUp, ThumbsDown,
   ArrowRight, Clock, XCircle, Heart
 } from 'lucide-react';
+import { Modal } from '../components/Modal';
 import './pages.css';
 
 // Helper to load Razorpay SDK dynamically
@@ -43,6 +44,9 @@ const DiffRow = ({ label, oldVal, newVal }) => {
 export const Payments = ({ data, loading, refreshData }) => {
   const { currentUser, globalConfig } = useAuth();
   const [activeTab, setActiveTab] = useState('dues');
+  const [sortField, setSortField] = useState('Due Date');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [groupBy, setGroupBy] = useState('None'); // 'None', 'Member Name', 'Category'
   
   const COMMITTEE_ROLES = globalConfig?.coreCommitteeRoles || ['President', 'Secretary', 'Treasurer'];
   const PAYMENT_CATEGORIES = globalConfig?.paymentCategories || [
@@ -126,6 +130,31 @@ export const Payments = ({ data, loading, refreshData }) => {
 
   const totalDuesAmount = myDues.reduce((sum, p) => sum + Number(p["Amount"]), 0);
   const allDuesAmount = allDues.reduce((sum, p) => sum + Number(p["Amount"]), 0);
+
+  const sortPayments = (list) => {
+    return [...list].sort((a, b) => {
+      let valA, valB;
+      if (sortField === 'Amount') {
+        valA = Number(a["Amount"] || 0);
+        valB = Number(b["Amount"] || 0);
+      } else if (sortField === 'Posted Date') {
+        valA = a["Payment ID"]?.startsWith("P") ? Number(a["Payment ID"].substring(1, 14)) : 0;
+        valB = b["Payment ID"]?.startsWith("P") ? Number(b["Payment ID"].substring(1, 14)) : 0;
+      } else {
+        valA = new Date(a["Due Date"] || 0).getTime();
+        valB = new Date(b["Due Date"] || 0).getTime();
+      }
+      
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+
+  const sortedAllDues = sortPayments(allDues);
+  const sortedMyDues = sortPayments(myDues);
+  const sortedAllHistory = sortPayments(allHistory);
+  const sortedMyHistory = sortPayments(myHistory);
 
   // Proposed by me — pending/rejected
   const myProposedEdits = paymentEdits.filter(e =>
@@ -585,405 +614,449 @@ export const Payments = ({ data, loading, refreshData }) => {
         </button>
       </div>
 
+      {/* Sorting & Grouping Controls */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        {isFinancialAdmin ? (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Group by:</span>
+            <select 
+              value={groupBy} 
+              onChange={(e) => setGroupBy(e.target.value)}
+              className="form-control"
+              style={{ width: 'auto', padding: '4px 8px', fontSize: '13px', minHeight: '30px' }}
+            >
+              <option value="None">None</option>
+              <option value="Member Name">Member</option>
+              <option value="Category">Receivable Type</option>
+            </select>
+          </div>
+        ) : <div />}
+        
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Sort by:</span>
+          <select 
+            value={sortField} 
+            onChange={(e) => setSortField(e.target.value)}
+            className="form-control"
+            style={{ width: 'auto', padding: '4px 8px', fontSize: '13px', minHeight: '30px' }}
+          >
+            <option value="Due Date">Due Date</option>
+            <option value="Amount">Amount</option>
+            <option value="Posted Date">Posted Date</option>
+          </select>
+          <button 
+            onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+            className="btn btn-secondary"
+            style={{ padding: '4px 8px', fontSize: '13px', minHeight: '30px', display: 'flex', alignItems: 'center' }}
+          >
+            {sortOrder === 'asc' ? 'Asc ↑' : 'Desc ↓'}
+          </button>
+        </div>
+      </div>
+
       {/* Dues / History list */}
       <div className="payments-list">
-        {activeTab === 'dues' ? (
-          (isFinancialAdmin ? allDues : myDues).length > 0 ? (
-            (isFinancialAdmin ? allDues : myDues).map(p => {
-              // Does this payment have a pending edit already?
-              const pendingEdit = paymentEdits.find(e => e["Payment ID"] === p["Payment ID"] && e["Status"] === "pending");
-              return (
-                <div key={p["Payment ID"]} className="card payment-row-card">
-                  <div className="payment-row-info">
-                    <div className="payment-row-title">{p["Description"]}</div>
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      {isFinancialAdmin && `Member: ${p["Member Name"]} • `}
-                      Due: {formatDisplayDate(p["Due Date"])}{p["Category"] && ` • ${p["Category"]}`}
-                    </span>
-                    {pendingEdit && (
-                      <span style={{ fontSize: 10, color: 'var(--rotary-gold)', fontWeight: 700, background: 'rgba(255,179,0,0.12)', padding: '2px 8px', borderRadius: 10, marginTop: 2, display: 'inline-block' }}>
-                        ⏳ {pendingEdit["Type"] === 'Waiver' ? 'Waiver pending approval' : 'Edit pending approval'}
-                      </span>
-                    )}
-                  </div>
-                  <div className="payment-row-actions">
-                    <span className="payment-row-amount">₹{Number(p["Amount"]).toLocaleString('en-IN')}</span>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      {p["Status"] === "Verification Pending" ? (
-                        <>
-                          <span className="payment-status-badge pending" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}>Verifying</span>
-                          {isCommittee && (
-                            <>
-                              <button onClick={() => api.verifyPayment(p["Payment ID"]).then(() => refreshData())} className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '11px', background: 'var(--success)', border: 'none' }}>Approve</button>
-                              <button onClick={() => api.rejectPaymentVerification(p["Payment ID"]).then(() => refreshData())} className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '11px', color: 'var(--error)' }}>Reject</button>
-                            </>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          {p["Member ID"] === myId && (
-                            <button onClick={() => handlePayNowClick(p)} className="btn btn-primary" style={{ padding: '6px 14px', borderRadius: '8px' }}>
-                              Pay Now
-                            </button>
-                          )}
-                          {isCommittee && !pendingEdit && p["Member ID"] !== myId && (
-                            <>
-                              <button
-                                onClick={() => openEditModal(p)}
-                                className="btn btn-secondary"
-                                style={{ padding: '6px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 4 }}
-                                title="Propose an edit"
-                              >
-                                <Pencil size={13} /> Edit
-                              </button>
-                              <button
-                                onClick={() => handleProposeWaiver(p)}
-                                className="btn btn-secondary"
-                                style={{ padding: '6px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 4, background: '#fef2f2', color: '#dc2626', borderColor: '#fecaca' }}
-                                title="Propose to waive this fee"
-                              >
-                                <X size={13} /> Waive
-                              </button>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
-              <Check size={36} style={{ color: 'var(--success)', marginBottom: '12px' }} />
-              <p>All dues are cleared. Great job!</p>
-            </div>
-          )
-        ) : (
-          (isFinancialAdmin ? allHistory : myHistory).length > 0 ? (
-            (isFinancialAdmin ? allHistory : myHistory).map(p => (
+        {(() => {
+          const renderPaymentItem = (p) => {
+            const pendingEdit = paymentEdits.find(e => e["Payment ID"] === p["Payment ID"] && e["Status"] === "pending");
+            return (
               <div key={p["Payment ID"]} className="card payment-row-card">
                 <div className="payment-row-info">
                   <div className="payment-row-title">{p["Description"]}</div>
-                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                     {isFinancialAdmin && `Member: ${p["Member Name"]} • `}
-                    Paid On: {formatDisplayDate(p["Paid Date"])}
+                    Due: {formatDisplayDate(p["Due Date"])}{p["Category"] && ` • ${p["Category"]}`}
                   </span>
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>Ref: {p["Reference"]}</span>
+                  {pendingEdit && (
+                    <span style={{ fontSize: 10, color: 'var(--rotary-gold)', fontWeight: 700, background: 'rgba(255,179,0,0.12)', padding: '2px 8px', borderRadius: 10, marginTop: 2, display: 'inline-block' }}>
+                      ⏳ {pendingEdit["Type"] === 'Waiver' ? 'Waiver pending approval' : 'Edit pending approval'}
+                    </span>
+                  )}
                 </div>
                 <div className="payment-row-actions">
                   <span className="payment-row-amount">₹{Number(p["Amount"]).toLocaleString('en-IN')}</span>
-                  <span className="payment-status-badge paid">Paid</span>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
-              <Info size={36} style={{ color: 'var(--text-muted)', marginBottom: '12px' }} /><p>No past payment records found.</p>
-            </div>
-          )
-        )}
-      </div>
-
-      {/* ══ PAYMENT DETAILS MODAL ═════════════════════════════════════════════════ */}
-      {selectedPayment && createPortal(
-        <div className="modal-overlay" onClick={() => setSelectedPayment(null)} style={{ zIndex: 1000 }}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <button className="drawer-close" onClick={() => setSelectedPayment(null)}><X size={24} /></button>
-            <div className="gateway-header">
-              <Landmark size={24} style={{ color: 'var(--rotary-blue)' }} />
-              <span className="gateway-brand">Rotary Checkout</span>
-            </div>
-            {payError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{payError}</span></div>}
-            {paySuccess ? (
-              <div style={{ textAlign: 'center', padding: '32px 0' }} className="animate-fade-in">
-                <div style={{ width: 60, height: 60, borderRadius: '50%', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                  <Check size={36} />
-                </div>
-                <h3 style={{ color: 'var(--success)' }}>Payment Successful!</h3>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Updating records. Please wait...</p>
-              </div>
-            ) : (
-              <form onSubmit={handleProcessPayment}>
-                <div className="gateway-summary-row">
-                  <span>Pay {selectedPayment["Description"]}</span>
-                  <span>₹{Number(selectedPayment["Amount"]).toLocaleString('en-IN')}</span>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Payment Method</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <button type="button" className={`btn ${paymentMethod === 'upi' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: 10 }} onClick={() => setPaymentMethod('upi')}>Razorpay (Cards / NetBanking / Web UPI)</button>
-                    <button type="button" className={`btn ${paymentMethod === 'native_upi' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: 10 }} onClick={() => setPaymentMethod('native_upi')}>Direct UPI App (GPay / Paytm / PhonePe)</button>
-                  </div>
-                </div>
-                {paymentMethod === 'native_upi' ? (
-                  <div className="form-group animate-fade-in" style={{ textAlign: 'center', padding: '10px 0' }}>
-                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: 16 }}>Click below to instantly open GPay, Paytm, PhonePe, or other UPI apps installed on your device.</p>
-                    <a 
-                      href={`upi://pay?pa=${TEST_UPI_ID}&pn=${encodeURIComponent(data?.chapterConfig?.Name || "Rotary Club")}&am=${Number(selectedPayment["Amount"]).toFixed(2)}&cu=INR&tn=${encodeURIComponent(selectedPayment["Description"])}`} 
-                      className="btn btn-primary" 
-                      style={{ display: 'block', textDecoration: 'none', marginBottom: 16, background: '#16a34a', border: 'none', padding: 14 }}
-                    >
-                      Open Installed UPI App
-                    </a>
-                    
-                    <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', textAlign: 'left' }}>
-                      <p style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 600, margin: '0 0 8px' }}>After paying, enter your Transaction ID (UTR) to verify:</p>
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        placeholder="Enter 12-digit UTR or Reference ID" 
-                        value={utr}
-                        onChange={(e) => setUtr(e.target.value)}
-                        required={paymentMethod === 'native_upi'}
-                        style={{ marginBottom: 12 }}
-                      />
-                      <button 
-                        type="submit" 
-                        className="btn btn-primary" 
-                        style={{ width: '100%' }}
-                        disabled={paying}
-                      >
-                        {paying ? 'Submitting...' : 'Submit for Verification'}
-                      </button>
-                    </div>
-                  </div>
-                ) : paymentMethod === 'upi' ? (
-                  <div className="form-group animate-fade-in" style={{ textAlign: 'center', padding: '20px 0' }}>
-                    {waitingForUpi ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                        <div className="loading-spinner" style={{ width: '40px', height: '40px', border: '3px solid rgba(0,0,0,0.1)', borderTopColor: 'var(--rotary-blue)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--rotary-blue-dark)' }}>Razorpay Checkout Opened</p>
-                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>Please complete the payment in the secure Razorpay window.</p>
-                      </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {p["Status"] === "Verification Pending" ? (
+                      <>
+                        <span className="payment-status-badge pending" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}>Verifying</span>
+                        {isCommittee && (
+                          <>
+                            <button onClick={() => api.verifyPayment(p["Payment ID"]).then(() => refreshData())} className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '11px', background: 'var(--success)', border: 'none' }}>Approve</button>
+                            <button onClick={() => api.rejectPaymentVerification(p["Payment ID"]).then(() => refreshData())} className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '11px', color: 'var(--error)' }}>Reject</button>
+                          </>
+                        )}
+                      </>
                     ) : (
                       <>
-                        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 500 }}>Powered by Razorpay</p>
-                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Click 'Pay' below to open the secure payment gateway.</p>
+                        {p["Member ID"] === myId && (
+                          <button onClick={() => handlePayNowClick(p)} className="btn btn-primary" style={{ padding: '6px 14px', borderRadius: '8px' }}>
+                            Pay Now
+                          </button>
+                        )}
+                        {isCommittee && !pendingEdit && p["Member ID"] !== myId && (
+                          <>
+                            <button onClick={() => openEditModal(p)} className="btn btn-secondary" style={{ padding: '6px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 4 }} title="Propose an edit"><Pencil size={13} /> Edit</button>
+                            <button onClick={() => handleProposeWaiver(p)} className="btn btn-secondary" style={{ padding: '6px 10px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 4, background: '#fef2f2', color: '#dc2626', borderColor: '#fecaca' }} title="Propose to waive this fee"><X size={13} /> Waive</button>
+                          </>
+                        )}
                       </>
                     )}
                   </div>
-                ) : (
-                  <div className="animate-fade-in">
-                    <div className="form-group"><label className="form-label">Card Number</label><input type="text" maxLength={16} className="form-control" placeholder="•••• •••• •••• ••••" value={cardNumber} onChange={e => setCardNumber(e.target.value)} required /></div>
-                    <div className="form-row-grid">
-                      <div className="form-group"><label className="form-label">Expiry (MM/YY)</label><input type="text" maxLength={5} className="form-control" placeholder="MM/YY" value={cardExpiry} onChange={e => setCardExpiry(e.target.value)} required /></div>
-                      <div className="form-group"><label className="form-label">CVV</label><input type="password" maxLength={3} className="form-control" placeholder="•••" value={cardCvv} onChange={e => setCardCvv(e.target.value)} required /></div>
-                    </div>
-                  </div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 11, margin: '20px 0' }}>
-                  <ShieldAlert size={14} style={{ color: 'var(--success)' }} />
-                  <span>Your connection is encrypted. {paymentMethod === 'upi' ? 'Payments processed securely by Razorpay.' : 'This is a simulated transaction.'}</span>
                 </div>
-                {paymentMethod !== 'native_upi' && (
-                  <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: 14 }} disabled={paying || waitingForUpi}>
-                    {paying || waitingForUpi ? 'Processing...' : (paymentMethod === 'upi' ? `Pay ₹${Number(selectedPayment["Amount"]).toLocaleString('en-IN')} with Razorpay` : `Pay ₹${Number(selectedPayment["Amount"]).toLocaleString('en-IN')}`)}
-                  </button>
-                )}
-              </form>
-            )}
+              </div>
+            );
+          };
+
+          const renderHistoryItem = (p) => (
+            <div key={p["Payment ID"]} className="card payment-row-card">
+              <div className="payment-row-info">
+                <div className="payment-row-title">{p["Description"]}</div>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  {isFinancialAdmin && `Member: ${p["Member Name"]} • `}
+                  Paid On: {formatDisplayDate(p["Paid Date"])}
+                </span>
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>Ref: {p["Reference"]}</span>
+              </div>
+              <div className="payment-row-actions">
+                <span className="payment-row-amount">₹{Number(p["Amount"]).toLocaleString('en-IN')}</span>
+                <span className="payment-status-badge paid">Paid</span>
+              </div>
+            </div>
+          );
+
+          const renderList = (list, isHistory) => {
+            if (list.length === 0) {
+              return (
+                <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
+                  {isHistory ? (
+                    <><Info size={36} style={{ color: 'var(--text-muted)', marginBottom: '12px' }} /><p>No past payment records found.</p></>
+                  ) : (
+                    <><Check size={36} style={{ color: 'var(--success)', marginBottom: '12px' }} /><p>All dues are cleared. Great job!</p></>
+                  )}
+                </div>
+              );
+            }
+
+            if (isFinancialAdmin && groupBy !== 'None') {
+              const grouped = list.reduce((acc, p) => {
+                const key = p[groupBy] || 'Other';
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(p);
+                return acc;
+              }, {});
+              
+              return Object.keys(grouped).sort().map(key => (
+                <div key={key} className="payment-group" style={{ marginBottom: '24px' }}>
+                  <h4 style={{ 
+                    padding: '10px 14px', 
+                    backgroundColor: 'var(--bg-secondary)', 
+                    borderLeft: '4px solid var(--rotary-gold)',
+                    borderRadius: '4px',
+                    marginBottom: '12px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    fontSize: '14px',
+                    color: 'var(--text-primary)'
+                  }}>
+                    <span>{key}</span>
+                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--rotary-blue)' }}>
+                      ₹{grouped[key].reduce((sum, p) => sum + Number(p.Amount || 0), 0).toLocaleString('en-IN')}
+                    </span>
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {grouped[key].map(p => isHistory ? renderHistoryItem(p) : renderPaymentItem(p))}
+                  </div>
+                </div>
+              ));
+            }
+
+            return list.map(p => isHistory ? renderHistoryItem(p) : renderPaymentItem(p));
+          };
+
+          if (activeTab === 'dues') {
+            return renderList(isFinancialAdmin ? sortedAllDues : sortedMyDues, false);
+          } else {
+            return renderList(isFinancialAdmin ? sortedAllHistory : sortedMyHistory, true);
+          }
+        })()}
+      </div>
+
+      {/* ══ PAYMENT DETAILS MODAL ═════════════════════════════════════════════════ */}
+      <Modal
+        isOpen={!!selectedPayment}
+        onClose={() => setSelectedPayment(null)}
+        title="Rotary Checkout"
+        subtitle="Secure payment gateway"
+        footer={
+          !paySuccess && paymentMethod !== 'native_upi' ? (
+            <button type="submit" form="pay-now-form" className="btn btn-primary" style={{ width: '100%', padding: 14 }} disabled={paying || waitingForUpi}>
+              {paying || waitingForUpi ? 'Processing...' : (paymentMethod === 'upi' ? `Pay ₹${Number(selectedPayment?.["Amount"]).toLocaleString('en-IN')} with Razorpay` : `Pay ₹${Number(selectedPayment?.["Amount"]).toLocaleString('en-IN')}`)}
+            </button>
+          ) : null
+        }
+      >
+        {payError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{payError}</span></div>}
+        {paySuccess ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }} className="animate-fade-in">
+            <div style={{ width: 60, height: 60, borderRadius: '50%', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Check size={36} />
+            </div>
+            <h3 style={{ color: 'var(--success)' }}>Payment Successful!</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Updating records. Please wait...</p>
           </div>
-        </div>,
-        document.body
-      )}
+        ) : (
+          <form id="pay-now-form" onSubmit={handleProcessPayment}>
+            <div className="gateway-summary-row" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '20px', fontWeight: 600 }}>
+              <span>Pay {selectedPayment?.["Description"]}</span>
+              <span>₹{Number(selectedPayment?.["Amount"]).toLocaleString('en-IN')}</span>
+            </div>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">Payment Method</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button type="button" className={`btn ${paymentMethod === 'upi' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: 10 }} onClick={() => setPaymentMethod('upi')}>Razorpay (Cards / NetBanking / Web UPI)</button>
+                <button type="button" className={`btn ${paymentMethod === 'native_upi' ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: 10 }} onClick={() => setPaymentMethod('native_upi')}>Direct UPI App (GPay / Paytm / PhonePe)</button>
+              </div>
+            </div>
+            {paymentMethod === 'native_upi' ? (
+              <div className="form-group animate-fade-in" style={{ textAlign: 'center', padding: '10px 0' }}>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: 16 }}>Click below to instantly open GPay, Paytm, PhonePe, or other UPI apps installed on your device.</p>
+                <a 
+                  href={`upi://pay?pa=${TEST_UPI_ID}&pn=${encodeURIComponent(data?.chapterConfig?.Name || "Rotary Club")}&am=${Number(selectedPayment?.["Amount"]).toFixed(2)}&cu=INR&tn=${encodeURIComponent(selectedPayment?.["Description"])}`} 
+                  className="btn btn-primary" 
+                  style={{ display: 'block', textDecoration: 'none', marginBottom: 16, background: '#16a34a', border: 'none', padding: 14 }}
+                >
+                  Open Installed UPI App
+                </a>
+                
+                <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', textAlign: 'left' }}>
+                  <p style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 600, margin: '0 0 8px' }}>After paying, enter your Transaction ID (UTR) to verify:</p>
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    placeholder="Enter 12-digit UTR or Reference ID" 
+                    value={utr}
+                    onChange={(e) => setUtr(e.target.value)}
+                    required={paymentMethod === 'native_upi'}
+                    style={{ marginBottom: 12, width: '100%', boxSizing: 'border-box' }}
+                  />
+                  <button 
+                    type="submit" 
+                    className="btn btn-primary" 
+                    style={{ width: '100%' }}
+                    disabled={paying}
+                  >
+                    {paying ? 'Submitting...' : 'Submit for Verification'}
+                  </button>
+                </div>
+              </div>
+            ) : paymentMethod === 'upi' ? (
+              <div className="form-group animate-fade-in" style={{ textAlign: 'center', padding: '20px 0' }}>
+                {waitingForUpi ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                    <div className="loading-spinner" style={{ width: '40px', height: '40px', border: '3px solid rgba(0,0,0,0.1)', borderTopColor: 'var(--rotary-blue)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+                    <p style={{ margin: 0, fontWeight: 600, color: 'var(--rotary-blue-dark)' }}>Razorpay Checkout Opened</p>
+                    <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>Please complete the payment in the secure Razorpay window.</p>
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 500 }}>Powered by Razorpay</p>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Click 'Pay' below to open the secure payment gateway.</p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="animate-fade-in">
+                <div className="form-group"><label className="form-label">Card Number</label><input type="text" maxLength={16} className="form-control" placeholder="•••• •••• •••• ••••" value={cardNumber} onChange={e => setCardNumber(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} /></div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group"><label className="form-label">Expiry (MM/YY)</label><input type="text" maxLength={5} className="form-control" placeholder="MM/YY" value={cardExpiry} onChange={e => setCardExpiry(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} /></div>
+                  <div className="form-group"><label className="form-label">CVV</label><input type="password" maxLength={3} className="form-control" placeholder="•••" value={cardCvv} onChange={e => setCardCvv(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} /></div>
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 11, marginTop: '20px' }}>
+              <ShieldAlert size={14} style={{ color: 'var(--success)' }} />
+              <span>Your connection is encrypted. {paymentMethod === 'upi' ? 'Payments processed securely by Razorpay.' : 'This is a simulated transaction.'}</span>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       {/* ══ EDIT PAYMENT MODAL ══════════════════════════════════════════════════ */}
-      {showEditModal && editTarget && createPortal(
-        <div className="modal-overlay" onClick={closeEditModal} style={{ zIndex: 1000 }}>
-          <div className="modal-content" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
-            <button className="drawer-close" onClick={closeEditModal} disabled={editSubmitting}><X size={24} /></button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--rotary-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Pencil size={18} color="white" />
+      <Modal
+        isOpen={showEditModal && !!editTarget}
+        onClose={closeEditModal}
+        title="Propose Payment Edit"
+        subtitle="Change requires approval from the other two committee members"
+        footer={
+          !editSuccess ? (
+            <>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={closeEditModal} disabled={editSubmitting}>Cancel</button>
+              <button type="submit" form="edit-payment-form" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} disabled={editSubmitting}>
+                {editSubmitting ? 'Submitting...' : <><Pencil size={15} /> Submit for Approval</>}
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {editError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{editError}</span></div>}
+
+        {editSuccess ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }} className="animate-fade-in">
+            <div style={{ width: 60, height: 60, borderRadius: '50%', backgroundColor: 'rgba(255,179,0,0.15)', color: 'var(--rotary-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Clock size={36} />
+            </div>
+            <h3 style={{ color: 'var(--rotary-blue-dark)' }}>Edit Submitted!</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Awaiting approval from the other two committee members.</p>
+          </div>
+        ) : (
+          <form id="edit-payment-form" onSubmit={handleProposeEdit}>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16, background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: 'var(--border-radius-md)' }}>
+              Member: <strong>{editTarget?.["Member Name"]}</strong> · Current Amount: <strong>₹{Number(editTarget?.["Amount"]).toLocaleString('en-IN')}</strong>
+            </div>
+            <div className="form-row-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Amount (₹) <span style={{ color: 'var(--error)' }}>*</span></label>
+                <input type="number" min="1" className="form-control" value={editAmount} onChange={e => setEditAmount(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
-              <div>
-                <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Propose Payment Edit</h2>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: 0 }}>Change requires approval from the other two committee members</p>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Due Date <span style={{ color: 'var(--error)' }}>*</span></label>
+                <input type="date" className="form-control" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
             </div>
-
-            {editError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{editError}</span></div>}
-
-            {editSuccess ? (
-              <div style={{ textAlign: 'center', padding: '32px 0' }} className="animate-fade-in">
-                <div style={{ width: 60, height: 60, borderRadius: '50%', backgroundColor: 'rgba(255,179,0,0.15)', color: 'var(--rotary-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                  <Clock size={36} />
-                </div>
-                <h3 style={{ color: 'var(--rotary-blue-dark)' }}>Edit Submitted!</h3>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Awaiting approval from the other two committee members.</p>
-              </div>
-            ) : (
-              <form onSubmit={handleProposeEdit}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16, background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: 'var(--border-radius-md)' }}>
-                  Member: <strong>{editTarget["Member Name"]}</strong> · Current Amount: <strong>₹{Number(editTarget["Amount"]).toLocaleString('en-IN')}</strong>
-                </div>
-                <div className="form-row-grid">
-                  <div className="form-group">
-                    <label className="form-label">Amount (₹) <span style={{ color: 'var(--error)' }}>*</span></label>
-                    <input type="number" min="1" className="form-control" value={editAmount} onChange={e => setEditAmount(e.target.value)} required />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Due Date <span style={{ color: 'var(--error)' }}>*</span></label>
-                    <input type="date" className="form-control" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} required />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Category <span style={{ color: 'var(--error)' }}>*</span></label>
-                  <select className="form-control filter-select" style={{ width: '100%' }} value={editCategory} onChange={e => setEditCategory(e.target.value)}>
-                    {PAYMENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Description <span style={{ color: 'var(--error)' }}>*</span></label>
-                  <input type="text" className="form-control" value={editDescription} onChange={e => setEditDescription(e.target.value)} required />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Notes</label>
-                  <input type="text" className="form-control" placeholder="Optional internal note" value={editNotes} onChange={e => setEditNotes(e.target.value)} />
-                </div>
-                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-                  <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={closeEditModal} disabled={editSubmitting}>Cancel</button>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} disabled={editSubmitting}>
-                    {editSubmitting ? 'Submitting...' : <><Pencil size={15} /> Submit for Approval</>}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">Category <span style={{ color: 'var(--error)' }}>*</span></label>
+              <select className="form-control filter-select" style={{ width: '100%', boxSizing: 'border-box' }} value={editCategory} onChange={e => setEditCategory(e.target.value)}>
+                {PAYMENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">Description <span style={{ color: 'var(--error)' }}>*</span></label>
+              <input type="text" className="form-control" value={editDescription} onChange={e => setEditDescription(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} />
+            </div>
+            <div className="form-group" style={{ marginBottom: '24px' }}>
+              <label className="form-label">Notes</label>
+              <input type="text" className="form-control" placeholder="Optional internal note" value={editNotes} onChange={e => setEditNotes(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }} />
+            </div>
+          </form>
+        )}
+      </Modal>
 
       {/* ══ CREATE RECEIVABLE MODAL ══════════════════════════════════════════════ */}
-      {showCreateModal && createPortal(
-        <div className="modal-overlay" onClick={closeCreateModal} style={{ zIndex: 1000 }}>
-          <div className="modal-content" style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
-            <button className="drawer-close" onClick={closeCreateModal} disabled={creating}><X size={24} /></button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--rotary-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <CreditCard size={20} color="white" />
+      <Modal
+        isOpen={showCreateModal}
+        onClose={closeCreateModal}
+        title="Create Payment Receivable"
+        subtitle="Raise a new due for selected members"
+        footer={
+          !createSuccess ? (
+            <>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={closeCreateModal} disabled={creating}>Cancel</button>
+              <button type="submit" form="create-receivable-form" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} disabled={creating}>
+                {creating ? 'Creating...' : <><Plus size={16} /> Create Dues</>}
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {createError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{createError}</span></div>}
+        {createSuccess ? (
+          <div style={{ textAlign: 'center', padding: '32px 0' }} className="animate-fade-in">
+            <div style={{ width: 60, height: 60, borderRadius: '50%', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}><Check size={36} /></div>
+            <h3 style={{ color: 'var(--success)' }}>Receivables Created!</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Added for {selectedMemberIds.length} member{selectedMemberIds.length > 1 ? 's' : ''}. Refreshing...</p>
+          </div>
+        ) : (
+          <form id="create-receivable-form" onSubmit={handleCreateReceivables}>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label className="form-label" style={{ margin: 0 }}><Users size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Select Members <span style={{ color: 'var(--error)' }}>*</span></label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => setSelectedMemberIds(members.map(m => m["Member ID"]))} style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--rotary-blue)', cursor: 'pointer', fontWeight: 600, padding: '2px 6px' }}>All</button>
+                  <button type="button" onClick={() => setSelectedMemberIds([])} style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: 600, padding: '2px 6px' }}>Clear</button>
+                </div>
               </div>
-              <div>
-                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: 'var(--rotary-blue-dark)' }}>Create Payment Receivable</h2>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>Raise a new due for selected members</p>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-md)', maxHeight: 180, overflowY: 'auto', backgroundColor: 'var(--bg-secondary)' }}>
+                {members.map(member => {
+                  const isChecked = selectedMemberIds.includes(member["Member ID"]);
+                  return (
+                    <label key={member["Member ID"]} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', backgroundColor: isChecked ? 'rgba(0,61,165,0.05)' : 'transparent', transition: 'background-color 0.15s' }}>
+                      {isChecked ? <CheckSquare size={18} color="var(--rotary-blue)" /> : <Square size={18} color="var(--text-muted)" />}
+                      <input type="checkbox" style={{ display: 'none' }} checked={isChecked} onChange={() => toggleMember(member["Member ID"])} />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{member["Name"]}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{member["Role"]} · {member["Classification"]}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              {selectedMemberIds.length > 0 && <p style={{ fontSize: 11, color: 'var(--rotary-blue)', marginTop: 6, fontWeight: 600 }}>{selectedMemberIds.length} member{selectedMemberIds.length > 1 ? 's' : ''} selected</p>}
+            </div>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">Category <span style={{ color: 'var(--error)' }}>*</span></label>
+              <select className="form-control filter-select" style={{ width: '100%', boxSizing: 'border-box' }} value={rcCategory} onChange={e => setRcCategory(e.target.value)} required>
+                {PAYMENT_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+            <div className="form-row-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Amount (₹) <span style={{ color: 'var(--error)' }}>*</span></label>
+                <input type="number" min="1" className="form-control" placeholder="e.g. 1500" value={rcAmount} onChange={e => setRcAmount(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} />
+              </div>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label"><Calendar size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Due Date <span style={{ color: 'var(--error)' }}>*</span></label>
+                <input type="date" className="form-control" value={rcDueDate} onChange={e => setRcDueDate(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
             </div>
-            {createError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{createError}</span></div>}
-            {createSuccess ? (
-              <div style={{ textAlign: 'center', padding: '32px 0' }} className="animate-fade-in">
-                <div style={{ width: 60, height: 60, borderRadius: '50%', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}><Check size={36} /></div>
-                <h3 style={{ color: 'var(--success)' }}>Receivables Created!</h3>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Added for {selectedMemberIds.length} member{selectedMemberIds.length > 1 ? 's' : ''}. Refreshing...</p>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">Description <span style={{ color: 'var(--error)' }}>*</span></label>
+              <input type="text" className="form-control" placeholder="e.g. Membership Fee 2026" value={rcDescription} onChange={e => setRcDescription(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} />
+            </div>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label" style={{ color: 'var(--text-secondary)' }}>Link to Event (Optional)</label>
+              <select className="form-control filter-select" style={{ width: '100%', boxSizing: 'border-box' }} value={rcEventId} onChange={e => setRcEventId(e.target.value)}>
+                <option value="">— No event —</option>
+                {upcomingEvents.map(ev => <option key={ev["Event ID"]} value={ev["Event ID"]}>{ev["Event Name"]} ({ev["Date"]})</option>)}
+              </select>
+            </div>
+            {selectedMemberIds.length > 0 && rcAmount > 0 && (
+              <div style={{ backgroundColor: 'rgba(0,61,165,0.06)', border: '1px solid rgba(0,61,165,0.15)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px', marginBottom: 16, fontSize: 13 }}>
+                <span style={{ fontWeight: 700, color: 'var(--rotary-blue-dark)' }}>Preview: </span>
+                Creating <strong>{selectedMemberIds.length}</strong> receivable{selectedMemberIds.length > 1 ? 's' : ''} of <strong>₹{Number(rcAmount).toLocaleString('en-IN')}</strong> each — total <strong>₹{(selectedMemberIds.length * Number(rcAmount)).toLocaleString('en-IN')}</strong>
               </div>
-            ) : (
-              <form onSubmit={handleCreateReceivables}>
-                <div className="form-group">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <label className="form-label" style={{ margin: 0 }}><Users size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Select Members <span style={{ color: 'var(--error)' }}>*</span></label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button type="button" onClick={() => setSelectedMemberIds(members.map(m => m["Member ID"]))} style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--rotary-blue)', cursor: 'pointer', fontWeight: 600, padding: '2px 6px' }}>All</button>
-                      <button type="button" onClick={() => setSelectedMemberIds([])} style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: 600, padding: '2px 6px' }}>Clear</button>
-                    </div>
-                  </div>
-                  <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-md)', maxHeight: 180, overflowY: 'auto', backgroundColor: 'var(--bg-secondary)' }}>
-                    {members.map(member => {
-                      const isChecked = selectedMemberIds.includes(member["Member ID"]);
-                      return (
-                        <label key={member["Member ID"]} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)', backgroundColor: isChecked ? 'rgba(0,61,165,0.05)' : 'transparent', transition: 'background-color 0.15s' }}>
-                          {isChecked ? <CheckSquare size={18} color="var(--rotary-blue)" /> : <Square size={18} color="var(--text-muted)" />}
-                          <input type="checkbox" style={{ display: 'none' }} checked={isChecked} onChange={() => toggleMember(member["Member ID"])} />
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{member["Name"]}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{member["Role"]} · {member["Classification"]}</div>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {selectedMemberIds.length > 0 && <p style={{ fontSize: 11, color: 'var(--rotary-blue)', marginTop: 6, fontWeight: 600 }}>{selectedMemberIds.length} member{selectedMemberIds.length > 1 ? 's' : ''} selected</p>}
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Category <span style={{ color: 'var(--error)' }}>*</span></label>
-                  <select className="form-control filter-select" style={{ width: '100%' }} value={rcCategory} onChange={e => setRcCategory(e.target.value)} required>
-                    {PAYMENT_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                  </select>
-                </div>
-                <div className="form-row-grid">
-                  <div className="form-group">
-                    <label className="form-label">Amount (₹) <span style={{ color: 'var(--error)' }}>*</span></label>
-                    <input type="number" min="1" className="form-control" placeholder="e.g. 1500" value={rcAmount} onChange={e => setRcAmount(e.target.value)} required />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label"><Calendar size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Due Date <span style={{ color: 'var(--error)' }}>*</span></label>
-                    <input type="date" className="form-control" value={rcDueDate} onChange={e => setRcDueDate(e.target.value)} required />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Description <span style={{ color: 'var(--error)' }}>*</span></label>
-                  <input type="text" className="form-control" placeholder="e.g. Membership Fee 2026" value={rcDescription} onChange={e => setRcDescription(e.target.value)} required />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" style={{ color: 'var(--text-secondary)' }}>Link to Event (Optional)</label>
-                  <select className="form-control filter-select" style={{ width: '100%' }} value={rcEventId} onChange={e => setRcEventId(e.target.value)}>
-                    <option value="">— No event —</option>
-                    {upcomingEvents.map(ev => <option key={ev["Event ID"]} value={ev["Event ID"]}>{ev["Event Name"]} ({ev["Date"]})</option>)}
-                  </select>
-                </div>
-                {selectedMemberIds.length > 0 && rcAmount > 0 && (
-                  <div style={{ backgroundColor: 'rgba(0,61,165,0.06)', border: '1px solid rgba(0,61,165,0.15)', borderRadius: 'var(--border-radius-md)', padding: '12px 14px', marginBottom: 16, fontSize: 13 }}>
-                    <span style={{ fontWeight: 700, color: 'var(--rotary-blue-dark)' }}>Preview: </span>
-                    Creating <strong>{selectedMemberIds.length}</strong> receivable{selectedMemberIds.length > 1 ? 's' : ''} of <strong>₹{Number(rcAmount).toLocaleString('en-IN')}</strong> each — total <strong>₹{(selectedMemberIds.length * Number(rcAmount)).toLocaleString('en-IN')}</strong>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={closeCreateModal} disabled={creating}>Cancel</button>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} disabled={creating}>
-                    {creating ? 'Creating...' : <><Plus size={16} /> Create Dues</>}
-                  </button>
-                </div>
-              </form>
             )}
-          </div>
-        </div>,
-        document.body
-      )}
+          </form>
+        )}
+      </Modal>
       {/* CHARITY MODAL */}
-      {showCharityModal && createPortal(
-        <div className="modal-overlay" style={{ zIndex: 1000 }}>
-          <div className="modal-content" style={{ maxWidth: 450 }}>
-            <button className="drawer-close" onClick={() => setShowCharityModal(false)}><X size={24} /></button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--rotary-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Heart size={20} color="white" />
-              </div>
-              <div>
-                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Donate to Charity</h2>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>Contribute any amount to club charities</p>
-              </div>
-            </div>
-            {charityError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{charityError}</span></div>}
-            
-            <form onSubmit={handleCreateCharityDonation}>
-              <div className="form-group">
-                <label className="form-label">Donation Amount (₹) <span style={{ color: 'var(--error)' }}>*</span></label>
-                <input type="number" min="1" className="form-control" placeholder="e.g. 500" value={charityAmount} onChange={e => setCharityAmount(e.target.value)} required />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Purpose / Description</label>
-                <input type="text" className="form-control" placeholder="e.g. For Flood Relief Fund" value={charityDescription} onChange={e => setCharityDescription(e.target.value)} />
-              </div>
-              <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={() => setShowCharityModal(false)} disabled={charitySubmitting}>Cancel</button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'var(--rotary-gold)', border: 'none', color: '#000' }} disabled={charitySubmitting}>
-                  {charitySubmitting ? 'Creating...' : <><Heart size={16} /> Make Donation</>}
-                </button>
-              </div>
-            </form>
+      <Modal
+        isOpen={showCharityModal}
+        onClose={() => setShowCharityModal(false)}
+        title="Donate to Charity"
+        subtitle="Contribute any amount to club charities"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: 12 }} onClick={() => setShowCharityModal(false)} disabled={charitySubmitting}>Cancel</button>
+            <button type="submit" form="charity-donation-form" className="btn btn-primary" style={{ flex: 2, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'var(--rotary-gold)', border: 'none', color: '#000' }} disabled={charitySubmitting}>
+              {charitySubmitting ? 'Creating...' : <><Heart size={16} /> Make Donation</>}
+            </button>
+          </>
+        }
+      >
+        {charityError && <div className="login-error" style={{ marginBottom: 16 }}><AlertCircle size={18} /><span>{charityError}</span></div>}
+        
+        <form id="charity-donation-form" onSubmit={handleCreateCharityDonation}>
+          <div className="form-group" style={{ marginBottom: '16px' }}>
+            <label className="form-label">Donation Amount (₹) <span style={{ color: 'var(--error)' }}>*</span></label>
+            <input type="number" min="1" className="form-control" placeholder="e.g. 500" value={charityAmount} onChange={e => setCharityAmount(e.target.value)} required style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
-        </div>,
-        document.body
-      )}
+          <div className="form-group" style={{ marginBottom: '16px' }}>
+            <label className="form-label">Purpose / Description</label>
+            <input type="text" className="form-control" placeholder="e.g. For Flood Relief Fund" value={charityDescription} onChange={e => setCharityDescription(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }} />
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

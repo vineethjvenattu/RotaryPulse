@@ -1,6 +1,7 @@
 import { db, storage } from './firebase';
 import { collection, getDocs, getDoc, doc, setDoc, deleteDoc, updateDoc, query, where, writeBatch, deleteField, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { calculateMemberBadges } from '../utils/badges';
 
 // Temporary helper to clean DB
 window.cleanMalformedMembers = async () => {
@@ -52,10 +53,11 @@ export const api = {
     let paymentsList = [];
     let announcementsList = [];
     let paymentEditsList = [];
+    let opinionsList = [];
 
     if (activeChapterId) {
       try {
-        const [membersSnap, feedbacksSnap, eventsSnap, attendanceSnap, paymentsSnap, announcementsSnap, paymentEditsSnap] = await Promise.all([
+        const [membersSnap, feedbacksSnap, eventsSnap, attendanceSnap, paymentsSnap, announcementsSnap, paymentEditsSnap, opinionsSnap] = await Promise.all([
           getDocs(collection(db, "chapters", activeChapterId, "members")),
           getDocs(collection(db, "chapters", activeChapterId, "feedbacks")),
           getDocs(collection(db, "chapters", activeChapterId, "events")),
@@ -63,6 +65,7 @@ export const api = {
           getDocs(collection(db, "chapters", activeChapterId, "payments")),
           getDocs(collection(db, "chapters", activeChapterId, "announcements")),
           getDocs(collection(db, "chapters", activeChapterId, "payment_edits")),
+          getDocs(collection(db, "chapters", activeChapterId, "opinions")),
         ]);
 
         membersList = membersSnap.docs.map(doc => {
@@ -77,6 +80,7 @@ export const api = {
         paymentsList = paymentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         announcementsList = announcementsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         paymentEditsList = paymentEditsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        opinionsList = opinionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
       } catch (err) {
         console.error("Error fetching data from firebase:", err);
@@ -96,9 +100,35 @@ export const api = {
         payments: paymentsList,
         paymentEdits: paymentEditsList,
         announcements: announcementsList,
+        opinions: opinionsList,
         feedbacks: feedbacksList.sort((a,b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
       }
     };
+    
+    // Dynamically calculate badges for each member
+    result.data.members = result.data.members.map(member => {
+      const calculatedBadges = calculateMemberBadges(
+        member["Member ID"] || member.id,
+        result.data.payments,
+        result.data.attendance,
+        result.data.feedbacks,
+        result.data.opinions
+      );
+      
+      // Merge with any manually awarded or custom badges in the DB (like Paul Harris Fellow)
+      const existingBadges = member.badges || [];
+      const allBadges = [...existingBadges];
+      
+      calculatedBadges.forEach(cb => {
+        if (!allBadges.some(eb => eb.id === cb.id)) {
+          allBadges.push(cb);
+        }
+      });
+      
+      return { ...member, badges: allBadges };
+    });
+
+    return result;
   },
 
   listAllChapters: async () => {
@@ -135,6 +165,119 @@ export const api = {
     }
   },
 
+  getMember: async (chapterId, memberId) => {
+    try {
+      const docSnap = await getDoc(doc(db, "chapters", chapterId, "members", memberId));
+      if (docSnap.exists()) return { success: true, data: { id: docSnap.id, ...docSnap.data() } };
+      return { success: false, error: "Not found" };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  },
+
+  endorseMember: async (chapterId, targetMemberId, endorserName, badgeId) => {
+    try {
+      const memberRef = doc(db, "chapters", chapterId, "members", targetMemberId);
+      const memberSnap = await getDoc(memberRef);
+      if (!memberSnap.exists()) {
+        return { success: false, error: "Member not found" };
+      }
+      
+      const memberData = memberSnap.data();
+      const endorsements = memberData.endorsements || [];
+      
+      endorsements.push({
+        id: Date.now().toString(),
+        badgeId,
+        endorserName,
+        date: new Date().toISOString()
+      });
+      
+      await updateDoc(memberRef, { endorsements });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  addOpinion: async (eventId, memberId, memberName, opinionText, actionRequired, actionDetails, actionAssignee) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const docId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      await setDoc(doc(db, "chapters", activeChapterId, "opinions", docId), {
+        "Opinion ID": docId,
+        "Event ID": eventId,
+        "Member ID": memberId,
+        "Member Name": memberName,
+        "Opinion Text": opinionText,
+        "Action Required": actionRequired,
+        "Action Details": actionDetails,
+        "Action Assignee": actionAssignee || null,
+        "timestamp": new Date().toISOString()
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  updateOpinionAction: async (opinionId, actionDetails, actionAssignee) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      await setDoc(opinionRef, {
+        "Action Required": "Yes",
+        "Action Details": actionDetails,
+        "Action Assignee": actionAssignee,
+        "Action Status": "Pending"
+      }, { merge: true });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  updateOpinionStatus: async (opinionId, newStatus) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      await updateDoc(opinionRef, {
+        "Action Status": newStatus
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  voteOpinion: async (chapterId, opinionId, memberId) => {
+    try {
+      if (!chapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", chapterId, "opinions", opinionId);
+      const opinionSnap = await getDoc(opinionRef);
+      if (!opinionSnap.exists()) {
+        return { success: false, error: "Opinion not found" };
+      }
+      
+      const data = opinionSnap.data();
+      
+      if (data.memberId === memberId) {
+        return { success: false, error: "Self-voting is not allowed" };
+      }
+      
+      let votes = data.votes || [];
+      if (votes.includes(memberId)) {
+        votes = votes.filter(id => id !== memberId);
+      } else {
+        votes.push(memberId);
+      }
+      
+      await updateDoc(opinionRef, { votes });
+      return { success: true, votes };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
 
   assignChapterRole: async (chapterId, memberId, roleName) => {
     try {
