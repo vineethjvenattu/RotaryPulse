@@ -39,6 +39,13 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const [pendingRelations, setPendingRelations] = useState([]);
   const [whatsNew, setWhatsNew] = useState([]);
 
+  // Modification Workflow State
+  const [editingOpinion, setEditingOpinion] = useState(null);
+  const [editProposedText, setEditProposedText] = useState('');
+  const [editProposedDetails, setEditProposedDetails] = useState('');
+  const [editModLoading, setEditModLoading] = useState(false);
+  const [editModError, setEditModError] = useState('');
+
   React.useEffect(() => {
     const unsubscribeWhatsNew = api.subscribeToWhatsNew((notifications) => {
       setWhatsNew(notifications);
@@ -254,7 +261,8 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     .filter(p => p["Member ID"] === currentUser?.["Member ID"] && p["Status"] !== "Paid" && p["Status"] !== "Waived")
     .reduce((sum, p) => sum + Number(p["Amount"] || 0), 0);
   
-  const TEST_UPI_ID = data.chapterConfig?.upiId || import.meta.env.VITE_CLUB_UPI_ID || "testupi@ybl";
+  // Use dynamic UPI ID from Club Details, fallback to env or hardcoded string
+  const TEST_UPI_ID = data.clubDetails?.upiId || data.chapterConfig?.upiId || import.meta.env.VITE_CLUB_UPI_ID || "testupi@ybl";
 
   const handleSaveOpinion = async (e) => {
     e.preventDefault();
@@ -311,6 +319,59 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     }
   };
 
+  // Modification Handlers
+  const handleRequestDelete = async (opinionId) => {
+    if (!window.confirm("Are you sure you want to request deletion of this item? Another PST member will need to approve it.")) return;
+    await api.requestDeleteOpinion(opinionId, currentUser["Member ID"], currentUser["Name"]);
+    await refreshData();
+  };
+
+  const handleApproveDelete = async (opinionId) => {
+    await api.approveDeleteOpinion(opinionId, currentUser["Member ID"]);
+    await refreshData();
+  };
+
+  const handleRejectDelete = async (opinionId) => {
+    await api.rejectDeleteOpinion(opinionId);
+    await refreshData();
+  };
+
+  const handleRequestEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingOpinion) return;
+    setEditModError('');
+    setEditModLoading(true);
+    try {
+      const result = await api.requestEditOpinion(
+        editingOpinion["Opinion ID"],
+        currentUser["Member ID"],
+        currentUser["Name"],
+        editProposedText,
+        editProposedDetails
+      );
+      if (result.success) {
+        setEditingOpinion(null);
+        await refreshData();
+      } else {
+        setEditModError(result.error);
+      }
+    } catch (err) {
+      setEditModError(err.toString());
+    } finally {
+      setEditModLoading(false);
+    }
+  };
+
+  const handleApproveEdit = async (opinionId) => {
+    await api.approveEditOpinion(opinionId, currentUser["Member ID"]);
+    await refreshData();
+  };
+
+  const handleRejectEdit = async (opinionId) => {
+    await api.rejectEditOpinion(opinionId);
+    await refreshData();
+  };
+
   // Financial Sub-Categorisation
   const feePayments = meetingPayments.filter(p => p["Category"] === "Membership Fee");
   const drinksPayments = meetingPayments.filter(p => p["Category"] === "Fellowship Drinks");
@@ -325,7 +386,8 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
 
   // Birthdays and Anniversaries
   const today = new Date();
-  const currentMonthStr = today.toLocaleString('default', { month: 'long' }).toLowerCase();
+  const currentMonthStr = today.toLocaleString('default', { month: 'short' }).toLowerCase();
+  const currentMonthLongStr = today.toLocaleString('default', { month: 'long' }).toLowerCase();
   const currentDay = today.getDate();
 
   const maskYear = (dateStr) => {
@@ -366,6 +428,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     if (bday) {
       allCelebrations.push({
         member: m,
+        isFamilyMember: false,
         title: m["Name"],
         desc: `🎂 ${maskYear(m["Birthday"])}`,
         day: bday.day,
@@ -379,6 +442,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     if (anniv) {
       allCelebrations.push({
         member: m,
+        isFamilyMember: false,
         title: m["Name"],
         desc: `💍 ${m["Anniversary"]}`,
         day: anniv.day,
@@ -390,10 +454,14 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
 
     if (m.FamilyMembers && Array.isArray(m.FamilyMembers)) {
       m.FamilyMembers.forEach(fm => {
+        const isPrimaryMember = members.some(pm => pm["Name"]?.toLowerCase() === fm.name?.toLowerCase());
+        if (isPrimaryMember) return;
+
         const fmBday = parseDateStr(fm.birthday);
         if (fmBday) {
           allCelebrations.push({
             member: m,
+            isFamilyMember: true,
             title: `${fm.name} (${fm.relation} of ${m["Name"].split(' ')[0]})`,
             desc: `🎂 ${maskYear(fm.birthday)}`,
             day: fmBday.day,
@@ -406,8 +474,13 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     }
   });
 
-  const celebratingToday = allCelebrations.filter(c => c.day === currentDay && c.month === currentMonthStr);
-  const celebratingThisMonth = celebratingToday.length > 0 ? celebratingToday : allCelebrations.filter(c => c.month === currentMonthStr).slice(0, 5);
+  const isThisMonth = (c) => {
+    const m = String(c.month || '').toLowerCase();
+    return m === currentMonthStr || m === currentMonthLongStr;
+  };
+
+  const celebratingToday = allCelebrations.filter(c => c.day === currentDay && isThisMonth(c)).sort((a, b) => a.day - b.day);
+  const celebratingThisMonth = celebratingToday.length > 0 ? celebratingToday : allCelebrations.filter(c => isThisMonth(c)).sort((a, b) => a.day - b.day).slice(0, 5);
 
   const handleToggleTask = async (taskId, currentStatus) => {
     try {
@@ -476,18 +549,26 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     return dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning,';
+    if (hour < 17) return 'Good Afternoon,';
+    return 'Good Evening,';
+  };
+  const greeting = getGreeting();
+
   return (
     <div className="content-area animate-fade-in">
       <div className="page-header desktop-only">
         <div className="page-title">
-          <h1>Good Morning,</h1>
+          <h1>{greeting}</h1>
           <p className="page-subtitle">{currentUser ? currentUser["Name"] : "Rotarian"}</p>
         </div>
       </div>
 
       {/* Mobile Greeting Banner */}
       <div className="dashboard-mobile-banner">
-        <span className="dashboard-greeting-label">Good Morning,</span>
+        <span className="dashboard-greeting-label">{greeting}</span>
         <h2 className="dashboard-greeting-name">
           {currentUser ? currentUser["Name"] : "Rotarian"} 👋
         </h2>
@@ -496,6 +577,39 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       <div className="dashboard-grid">
         {/* Main Column */}
         <div className="dashboard-col">
+          
+          {/* Subscription Banner */}
+          {currentUser && currentUser.subscriptionStatus !== 'Active' && (
+            <div className="card animate-fade-in" style={{ 
+              marginBottom: '20px', 
+              background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', 
+              color: 'white', 
+              padding: '24px', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: '16px',
+              border: '1px solid #334155'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '12px', borderRadius: '50%' }}>
+                  <CreditCard size={24} color="#fbbf24" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: 'white' }}>Unlock Business Features</h3>
+                  <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#cbd5e1', lineHeight: '1.4' }}>
+                    Subscribe for ₹100/month to access the Member Directory and B2B Marketplace.
+                  </p>
+                </div>
+              </div>
+              <button 
+                className="btn btn-primary" 
+                onClick={() => setActiveTab('subscription')}
+                style={{ alignSelf: 'flex-start', background: '#fbbf24', color: '#0f172a', fontWeight: 600, border: 'none' }}
+              >
+                Subscribe Now
+              </button>
+            </div>
+          )}
           
           {/* Pending Approvals (Admin Only) */}
           {(isPresident || isSecretary) && pendingMembers.length > 0 && (
@@ -695,9 +809,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                   </button>
                 )}
               </div>
-              <h2 className="greeting-title" style={{ color: 'var(--text-primary)', margin: '0 0 4px 0', fontSize: '20px' }}>
-            Hello, {(currentUser?.Name || "Member").split(' ')[0]} 👋
-          </h2>    <div className="meeting-details" style={{ color: 'var(--text-secondary)' }}>
+              <div className="meeting-details" style={{ color: 'var(--text-secondary)' }}>
                 <div className="meeting-detail-item" style={{ color: 'var(--text-secondary)' }}>
                   <Calendar size={18} style={{ color: 'var(--rotary-blue)' }} />
                   <span>{formatDisplayDate(nextEvent["Date"])}</span>
@@ -947,7 +1059,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                                 {o["Action Details"]}
                               </div>
                             )}
-                            <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', marginTop: '8px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', marginTop: '8px', flexWrap: 'wrap', gap: '8px' }}>
                               <button 
                                 onClick={() => handleVoteOpinion(o["Opinion ID"])}
                                 style={{ 
@@ -967,6 +1079,44 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                                 <ThumbsUp size={12} /> 
                                 {(o.votes || []).length > 0 ? (o.votes || []).length : 'Vote'}
                               </button>
+                              
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                {o.deletionRequestedBy ? (
+                                  o.deletionRequestedBy === currentUser?.["Member ID"] ? (
+                                    <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>Deletion Pending Approval</span>
+                                  ) : (isPresident || isSecretary || isTreasurer) && (
+                                    <>
+                                      <button onClick={() => handleApproveDelete(o["Opinion ID"])} className="btn btn-primary" style={{ padding: '2px 6px', fontSize: '10px', background: 'var(--error)', borderColor: 'var(--error)' }}>Approve Delete</button>
+                                      <button onClick={() => handleRejectDelete(o["Opinion ID"])} className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '10px' }}>Reject Delete</button>
+                                    </>
+                                  )
+                                ) : o.editRequestedBy ? (
+                                  o.editRequestedBy === currentUser?.["Member ID"] ? (
+                                    <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>Edit Pending Approval</span>
+                                  ) : (isPresident || isSecretary || isTreasurer) && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#fffbeb', padding: '6px', borderRadius: '4px', border: '1px solid #fde68a', fontSize: '10px' }}>
+                                      <div style={{ fontWeight: 600 }}>Proposed Edit by {o.editRequestedByName}:</div>
+                                      <div>"{o.proposedText}"</div>
+                                      {o.proposedDetails && <div style={{ color: 'var(--error)' }}>{o.proposedDetails}</div>}
+                                      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                                        <button onClick={() => handleApproveEdit(o["Opinion ID"])} className="btn btn-primary" style={{ padding: '2px 6px', fontSize: '10px' }}>Approve Edit</button>
+                                        <button onClick={() => handleRejectEdit(o["Opinion ID"])} className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '10px' }}>Reject Edit</button>
+                                      </div>
+                                    </div>
+                                  )
+                                ) : (
+                                  (isPresident || isSecretary || isTreasurer) && (
+                                    <>
+                                      <button onClick={() => {
+                                        setEditingOpinion(o);
+                                        setEditProposedText(o["Opinion Text"] || '');
+                                        setEditProposedDetails(o["Action Details"] || '');
+                                      }} className="btn btn-secondary" style={{ fontSize: '10px', padding: '2px 6px' }}>✏️ Edit</button>
+                                      <button onClick={() => handleRequestDelete(o["Opinion ID"])} className="btn btn-secondary" style={{ fontSize: '10px', padding: '2px 6px', color: 'var(--error)', borderColor: 'var(--error)' }}>🗑️ Delete</button>
+                                    </>
+                                  )
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -1169,10 +1319,46 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                                   <button onClick={() => handleToggleOpinionAction(task.originalOpinion, task.isAssignee)} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>
                                     Approve
                                   </button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleRejectOpinionAction(task.originalOpinion, e); }} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                                  <button onClick={(e) => { e.stopPropagation(); handleRejectOpinionAction(task.originalOpinion, e); }} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--error)', borderColor: 'var(--error)' }}>
                                     Reject
                                   </button>
                                 </>
+                              )}
+                              
+                              {task.originalOpinion.deletionRequestedBy ? (
+                                task.originalOpinion.deletionRequestedBy === currentUser?.["Member ID"] ? (
+                                  <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>Deletion Pending</span>
+                                ) : (isPresident || isSecretary || isTreasurer) && (
+                                  <>
+                                    <button onClick={() => handleApproveDelete(task.originalOpinion["Opinion ID"])} className="btn btn-primary" style={{ padding: '2px 6px', fontSize: '10px', background: 'var(--error)', borderColor: 'var(--error)' }}>Approve Delete</button>
+                                    <button onClick={() => handleRejectDelete(task.originalOpinion["Opinion ID"])} className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '10px' }}>Reject Delete</button>
+                                  </>
+                                )
+                              ) : task.originalOpinion.editRequestedBy ? (
+                                task.originalOpinion.editRequestedBy === currentUser?.["Member ID"] ? (
+                                  <span style={{ fontSize: '10px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>Edit Pending</span>
+                                ) : (isPresident || isSecretary || isTreasurer) && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#fffbeb', padding: '6px', borderRadius: '4px', border: '1px solid #fde68a', fontSize: '10px', marginTop: '4px', width: '100%' }}>
+                                    <div style={{ fontWeight: 600 }}>Proposed Edit by {task.originalOpinion.editRequestedByName}:</div>
+                                    <div>"{task.originalOpinion.proposedText}"</div>
+                                    {task.originalOpinion.proposedDetails && <div style={{ color: 'var(--error)' }}>{task.originalOpinion.proposedDetails}</div>}
+                                    <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                                      <button onClick={() => handleApproveEdit(task.originalOpinion["Opinion ID"])} className="btn btn-primary" style={{ padding: '2px 6px', fontSize: '10px' }}>Approve Edit</button>
+                                      <button onClick={() => handleRejectEdit(task.originalOpinion["Opinion ID"])} className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '10px' }}>Reject Edit</button>
+                                    </div>
+                                  </div>
+                                )
+                              ) : (
+                                (isPresident || isSecretary || isTreasurer) && (
+                                  <>
+                                    <button onClick={() => {
+                                      setEditingOpinion(task.originalOpinion);
+                                      setEditProposedText(task.originalOpinion["Opinion Text"] || '');
+                                      setEditProposedDetails(task.originalOpinion["Action Details"] || '');
+                                    }} className="btn btn-secondary" style={{ fontSize: '10px', padding: '2px 6px' }}>✏️ Edit</button>
+                                    <button onClick={() => handleRequestDelete(task.originalOpinion["Opinion ID"])} className="btn btn-secondary" style={{ fontSize: '10px', padding: '2px 6px', color: 'var(--error)', borderColor: 'var(--error)' }}>🗑️ Delete</button>
+                                  </>
+                                )
                               )}
                             </>
                           ) : (
@@ -1211,7 +1397,14 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                 </p>
                 {celebratingThisMonth.map((celebration, idx) => (
                   <div key={idx} className="ticker-item">
-                    <Avatar member={celebration.member} size={56} className="ticker-avatar" />
+                    <Avatar 
+                      member={{ 
+                        Name: celebration.whatsappName, 
+                        Image: celebration.isFamilyMember ? null : celebration.member.Image 
+                      }} 
+                      size={56} 
+                      className="ticker-avatar" 
+                    />
                     <div className="ticker-info">
                       <div className="ticker-name">{celebration.title}</div>
                       <div className="ticker-desc">
@@ -1347,6 +1540,68 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!editingOpinion}
+        onClose={() => setEditingOpinion(null)}
+        title="Propose Edit"
+        footer={
+          <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ flex: 1, padding: '10px' }}
+              onClick={() => setEditingOpinion(null)}
+              disabled={editModLoading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="dashboard-edit-opinion-form"
+              className="btn btn-primary"
+              style={{ flex: 1, padding: '10px' }}
+              disabled={editModLoading}
+            >
+              {editModLoading ? 'Submitting...' : 'Submit Proposed Edit'}
+            </button>
+          </div>
+        }
+      >
+        <div style={{ padding: '4px' }}>
+          {editModError && (
+            <div className="login-error" style={{ marginBottom: '16px' }}>
+              <AlertCircle size={18} />
+              <span>{editModError}</span>
+            </div>
+          )}
+          <form id="dashboard-edit-opinion-form" onSubmit={handleRequestEditSubmit}>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>Proposed Discussion Text / Title *</label>
+              <textarea
+                className="form-control"
+                rows="3"
+                value={editProposedText}
+                onChange={(e) => setEditProposedText(e.target.value)}
+                required
+              />
+            </div>
+            
+            {editingOpinion && editingOpinion["Action Required"] === 'Yes' && (
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>Proposed Action Details *</label>
+                <textarea
+                  className="form-control"
+                  rows="3"
+                  value={editProposedDetails}
+                  onChange={(e) => setEditProposedDetails(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+          </form>
+        </div>
       </Modal>
 
       {/* WHAT'S NEW SECTION */}

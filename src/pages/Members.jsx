@@ -22,8 +22,11 @@ export const Members = ({ data, loading, refreshData }) => {
   const [editRole, setEditRole] = useState('');
   const [deletionNotes, setDeletionNotes] = useState('');
   const [pendingPayments, setPendingPayments] = useState([]);
-  const [duesAction, setDuesAction] = useState('none');
   const [fetchingPayments, setFetchingPayments] = useState(false);
+  const [duesAction, setDuesAction] = useState('none');
+  const [savingDesignations, setSavingDesignations] = useState(false);
+  
+  const [selectedBadgeForDates, setSelectedBadgeForDates] = useState(null);
 
   // Endorse State
   const [showEndorseModal, setShowEndorseModal] = useState(false);
@@ -233,7 +236,7 @@ export const Members = ({ data, loading, refreshData }) => {
         <>
           {filteredMembers.filter(m => m.Role && m.Role !== 'Member').length > 0 && (
             <>
-              <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '24px' }}>Chapter Leadership Roles</h2>
+              <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '24px' }}>Club Leadership Roles</h2>
               <div className="members-grid">
                 {filteredMembers
                   .filter(m => m.Role && m.Role !== 'Member')
@@ -457,43 +460,85 @@ export const Members = ({ data, loading, refreshData }) => {
                   )}
                 </div>
                 
-                {selectedMember.badges && selectedMember.badges.length > 0 ? (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                    {selectedMember.badges.map((badge, idx) => (
-                      <div key={idx} style={{ 
-                        display: 'flex', 
-                        flexDirection: 'column', 
-                        alignItems: 'center', 
-                        background: '#ffffff', 
-                        border: '1px solid var(--border-color)', 
-                        padding: '12px', 
-                        borderRadius: '8px', 
-                        width: '80px', 
-                        textAlign: 'center'
-                      }}>
-                        {badge.image ? (
-                          <img 
-                            src={badge.image} 
-                            alt={badge.name} 
-                            style={{ width: '40px', height: '40px', marginBottom: '8px', objectFit: 'contain' }} 
-                          />
-                        ) : (
-                          <div style={{
-                            width: '40px', height: '40px', borderRadius: '50%', background: 'var(--rotary-gold)', 
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '8px'
-                          }}>
-                            <Award size={20} />
+                {(() => {
+                  if (selectedMember.badges && selectedMember.badges.length > 0) {
+                    const groupedBadgesMap = selectedMember.badges.reduce((acc, badge) => {
+                      if (!acc[badge.name]) {
+                        acc[badge.name] = { ...badge, count: 0, dates: [] };
+                      }
+                      acc[badge.name].count += 1;
+                      if (badge.date) {
+                        acc[badge.name].dates.push(badge.date);
+                      }
+                      return acc;
+                    }, {});
+                    const uniqueBadges = Object.values(groupedBadgesMap);
+
+                    return (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                        {uniqueBadges.map((badge, idx) => (
+                          <div 
+                            key={idx} 
+                            onClick={() => setSelectedBadgeForDates(badge)}
+                            style={{ 
+                              display: 'flex', 
+                              flexDirection: 'column', 
+                              alignItems: 'center', 
+                              background: '#ffffff', 
+                              border: '1px solid var(--border-color)', 
+                              padding: '12px', 
+                              borderRadius: '8px', 
+                              width: '80px', 
+                              textAlign: 'center',
+                              cursor: 'pointer',
+                              position: 'relative'
+                            }}
+                          >
+                            {badge.count > 0 && (
+                              <div style={{
+                                position: 'absolute',
+                                top: '-6px',
+                                right: '-6px',
+                                background: 'var(--rotary-gold)',
+                                color: '#fff',
+                                borderRadius: '50%',
+                                width: '20px',
+                                height: '20px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '10px',
+                                fontWeight: 'bold',
+                                zIndex: 10
+                              }}>
+                                {badge.count}
+                              </div>
+                            )}
+                            {badge.image ? (
+                              <img 
+                                src={badge.image} 
+                                alt={badge.name} 
+                                style={{ width: '40px', height: '40px', marginBottom: '8px', objectFit: 'contain' }} 
+                              />
+                            ) : (
+                              <div style={{
+                                width: '40px', height: '40px', borderRadius: '50%', background: 'var(--rotary-gold)', 
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '8px'
+                              }}>
+                                <Award size={20} />
+                              </div>
+                            )}
+                            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.2' }}>
+                              {badge.name}
+                            </div>
                           </div>
-                        )}
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.2' }}>
-                          {badge.name}
-                        </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>No badges earned yet.</p>
-                )}
+                    );
+                  } else {
+                    return <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>No badges earned yet.</p>;
+                  }
+                })()}
                 
                 {/* Endorsements List */}
                 {selectedMember.endorsements && selectedMember.endorsements.length > 0 && (
@@ -609,6 +654,25 @@ export const Members = ({ data, loading, refreshData }) => {
         <button className="btn btn-secondary" style={{ width: '100%', marginTop: '20px' }} onClick={() => setShowEditModal(false)}>
           Cancel
         </button>
+      </Modal>
+
+      <Modal isOpen={!!selectedBadgeForDates} onClose={() => setSelectedBadgeForDates(null)} title={selectedBadgeForDates ? `${selectedBadgeForDates.name} Earned Dates` : ''} zIndex={10000}>
+        <div style={{ padding: '20px' }}>
+          {selectedBadgeForDates?.dates && selectedBadgeForDates.dates.length > 0 ? (
+            <ul style={{ paddingLeft: '20px', margin: 0 }}>
+              {selectedBadgeForDates.dates.map((date, idx) => (
+                <li key={idx} style={{ marginBottom: '8px', fontSize: '14px' }}>
+                  {date ? new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown Date'}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>No specific dates recorded for this trophy.</p>
+          )}
+        </div>
+        <div className="modal-footer" style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+          <button className="btn btn-secondary" onClick={() => setSelectedBadgeForDates(null)}>Close</button>
+        </div>
       </Modal>
     </div>
   );

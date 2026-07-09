@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Image as ImageIcon, Loader2, X, ChevronLeft, ChevronRight, ArrowLeft, Folder } from 'lucide-react';
+import { Image as ImageIcon, Loader2, X, ChevronLeft, ChevronRight, ArrowLeft, Folder, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import './pages.css';
 
 export const Gallery = () => {
-  const { currentUser, globalConfig } = useAuth();
+  const { currentUser, isPresident, isSecretary, isTreasurer } = useAuth();
+  const isPST = isPresident || isSecretary || isTreasurer;
+  
   const [albums, setAlbums] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [tokenExpiryDate, setTokenExpiryDate] = useState(null);
   
   const [selectedAlbum, setSelectedAlbum] = useState(null);
   const [selectedIndex, setSelectedIndex] = useState(null);
@@ -18,20 +21,22 @@ export const Gallery = () => {
     // Function to fetch photos using standard fetch
     const fetchPhotos = async () => {
       try {
-        let accessToken = import.meta.env.VITE_FB_ACCESS_TOKEN;
-        let pageId = globalConfig?.facebookPageId || '1206764219182291'; // Fallback page ID
+        let accessToken = null;
+        let pageId = null; 
 
         // If user belongs to a specific chapter, try to override with chapter-specific DB settings
         if (currentUser?.chapterId) {
           const chapterRes = await api.getChapterData(currentUser.chapterId);
           if (chapterRes.success && chapterRes.data) {
-            if (chapterRes.data.fbAccessToken) accessToken = chapterRes.data.fbAccessToken;
-            if (chapterRes.data.fbPageId) pageId = chapterRes.data.fbPageId;
+            const clubConfig = chapterRes.data.clubDetails || chapterRes.data; // Fallback to root for backwards compatibility
+            if (clubConfig.fbAccessToken) accessToken = clubConfig.fbAccessToken;
+            if (clubConfig.fbPageId) pageId = clubConfig.fbPageId;
+            if (clubConfig.fbTokenExpiryDate) setTokenExpiryDate(clubConfig.fbTokenExpiryDate);
           }
         }
         
         if (!accessToken || !pageId) {
-          setError('Facebook Gallery is not configured. Please add VITE_FB_ACCESS_TOKEN to .env or configure it in the Admin Dashboard.');
+          setError('Facebook Gallery is not configured. Please ask a Club Admin to configure it in Club Details.');
           setLoading(false);
           return;
         }
@@ -119,8 +124,26 @@ export const Gallery = () => {
 
   const selectedImage = selectedIndex !== null ? activeImages[selectedIndex] : null;
 
+  const isExpiringSoon = () => {
+    if (!tokenExpiryDate) return false;
+    const expiryDate = new Date(tokenExpiryDate);
+    const tenDaysFromNow = new Date();
+    tenDaysFromNow.setDate(tenDaysFromNow.getDate() + 10);
+    return expiryDate < tenDaysFromNow;
+  };
+
   return (
     <div className="content-area animate-fade-in">
+      {isPST && isExpiringSoon() && (
+        <div style={{ background: '#fef2f2', border: '1px solid #ef4444', color: '#b91c1c', padding: '12px 16px', borderRadius: '8px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <AlertTriangle size={20} color="#ef4444" />
+          <div style={{ fontSize: '14px' }}>
+            <strong style={{ display: 'block', marginBottom: '4px' }}>Action Required: Facebook Integration Expiring</strong>
+            The Facebook Access Token for this club will expire on {new Date(tokenExpiryDate).toLocaleDateString()}. Please go to <b>Club Details</b> to update it before it expires to prevent the Gallery from breaking.
+          </div>
+        </div>
+      )}
+      
       <div className="page-header" style={{ marginBottom: selectedAlbum ? '16px' : '24px' }}>
         <div className="page-title">
           <h1>Photo Gallery</h1>

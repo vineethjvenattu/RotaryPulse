@@ -186,8 +186,8 @@ export const Login = ({ onLoginSuccess }) => {
         />
         
         <div className="login-header">
-          <h1>Rotary Connect</h1>
-          <p>Stronger Together, Serving Better</p>
+          <h1>Rotary Pulse</h1>
+          <p>The heartbeat of your Rotary Club</p>
         </div>
 
         {error && (

@@ -5,17 +5,19 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { seedFirebaseDatabase } from '../services/firebaseSeeder';
-import { User, Users, Phone, Mail, Award, Calendar, Link, Settings, Database, LogOut, Activity, X, Camera, Edit2 } from 'lucide-react';
+import { User, Users, Phone, Mail, Award, Calendar, Link, Settings, Database, LogOut, Activity, X, Camera, Edit2, Info, Key } from 'lucide-react';
 import { Avatar } from '../components/Avatar';
 import { Modal } from '../components/Modal';
 import { getTagColor } from '../utils/tagColors';
 import './pages.css';
 
-export const Profile = () => {
-  const { currentUser, logout } = useAuth();
-  const [seeding, setSeeding] = useState(false);
+export const Profile = ({ data, refreshData }) => {
+  const { currentUser, logout, globalConfig } = useAuth();
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedBadgeForDates, setSelectedBadgeForDates] = useState(null);
   const [seedResult, setSeedResult] = useState(null);
   const [activities, setActivities] = useState([]);
+  const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
   
 
   const formatDateDisplay = (val) => {
@@ -46,7 +48,9 @@ export const Profile = () => {
 
   // Edit Profile State
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
-  const [editProfileForm, setEditProfileForm] = useState({ Mobile: '', Email: '', "Blood Group": '', Birthday: '', Anniversary: '' });
+  const [editProfileForm, setEditProfileForm] = useState({ Mobile: '', Email: '', "Blood Group": '', Birthday: '', Anniversary: '', CompanyName: '', Industry: '', BusinessDesignation: '' });
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState(null);
   const [availableAvatars, setAvailableAvatars] = useState([]);
   const [savingProfile, setSavingProfile] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -70,6 +74,7 @@ export const Profile = () => {
   // Family Members State
   const [showFamilyModal, setShowFamilyModal] = useState(false);
   const [familyForm, setFamilyForm] = useState({ name: '', relation: '', birthday: '', isRotarian: false, rotaryId: '' });
+  const [editFamilyMemberIndex, setEditFamilyMemberIndex] = useState(null);
   const [savingFamily, setSavingFamily] = useState(false);
   const [allPlatformMembers, setAllPlatformMembers] = useState([]);
   const [linkMode, setLinkMode] = useState('manual');
@@ -79,7 +84,7 @@ export const Profile = () => {
 
 
   useEffect(() => {
-    if (showEditProfileModal) {
+    if (showEditProfileModal || showEditProfile) {
       document.body.style.overflow = 'hidden';
       api.getAvailableAvatars().then(async (avatars) => {
         if (avatars.length === 0) {
@@ -93,7 +98,7 @@ export const Profile = () => {
     } else if (!showFamilyModal) {
       document.body.style.overflow = '';
     }
-  }, [showEditProfileModal]);
+  }, [showEditProfileModal, showEditProfile]);
 
   useEffect(() => {
     if (showFamilyModal) {
@@ -142,15 +147,6 @@ export const Profile = () => {
     setChangingPin(false);
   };
 
-  const handleClassificationChange = (e) => {
-    const val = e.target.value;
-    if (val) {
-      setClassification(val.charAt(0).toUpperCase() + val.slice(1).toLowerCase());
-    } else {
-      setClassification('');
-    }
-  };
-
   const handleSaveProfile = async () => {
     setSavingProfile(true);
     const updateData = {
@@ -158,9 +154,16 @@ export const Profile = () => {
       Email: editProfileForm.Email,
       "Blood Group": editProfileForm["Blood Group"],
       Birthday: editProfileForm.Birthday,
-      Anniversary: editProfileForm.Anniversary
+      Anniversary: editProfileForm.Anniversary,
+      CompanyName: editProfileForm.CompanyName,
+      Industry: editProfileForm.Industry,
+      BusinessDesignation: editProfileForm.BusinessDesignation
     };
-    const res = await api.updateUserProfile(currentUser.chapterId, currentUser["Member ID"], updateData);
+    
+    const targetId = editingMemberId || currentUser["Member ID"];
+    const targetChapterId = editingMemberId !== currentUser["Member ID"] ? (allPlatformMembers.find(m => m["Member ID"] === targetId)?.chapterId || currentUser.chapterId) : currentUser.chapterId;
+
+    const res = await api.updateUserProfile(targetChapterId, targetId, updateData);
     
     // Intelligently assign wedding date to spouse
     if (res.success && updateData.Anniversary && currentUser.FamilyMembers) {
@@ -176,11 +179,17 @@ export const Profile = () => {
 
     setSavingProfile(false);
     if (res.success) {
-      const updatedUser = { ...currentUser, ...updateData };
-      sessionStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
-      localStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
-      setShowEditProfileModal(false);
-      window.location.reload();
+      if (editingMemberId) {
+         setShowEditProfile(false);
+         setEditingMemberId(null);
+         refreshData();
+      } else {
+        const updatedUser = { ...currentUser, ...updateData };
+        sessionStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
+        localStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
+        setShowEditProfileModal(false);
+        window.location.reload();
+      }
     } else {
       alert("Error saving profile: " + res.error);
     }
@@ -249,27 +258,6 @@ export const Profile = () => {
       alert("Error claiming avatar: " + claimRes.error);
     }
   };
-
-  const handleSeedDatabase = async () => {
-    if (!window.confirm("Are you sure you want to seed the Firestore database with initial mock data? This will overwrite or add initial documents.")) {
-      return;
-    }
-    setSeeding(true);
-    setSeedResult(null);
-    try {
-      const res = await seedFirebaseDatabase();
-      if (res.success) {
-        setSeedResult({ success: true, message: "Database seeded successfully!" });
-      } else {
-        setSeedResult({ success: false, message: res.error || "Failed to seed database" });
-      }
-    } catch (err) {
-      setSeedResult({ success: false, message: err.toString() });
-    } finally {
-      setSeeding(false);
-    }
-  };
-
   const searchableMembers = useMemo(() => {
     const list = [];
     allPlatformMembers.forEach(m => {
@@ -361,11 +349,19 @@ export const Profile = () => {
       }
     }
 
-    const updatedFamily = [...(currentUser.FamilyMembers || []), finalForm];
+    let updatedFamily;
+    if (editFamilyMemberIndex !== null) {
+      updatedFamily = [...(currentUser.FamilyMembers || [])];
+      updatedFamily[editFamilyMemberIndex] = finalForm;
+    } else {
+      updatedFamily = [...(currentUser.FamilyMembers || []), finalForm];
+    }
+    
     const res = await api.updateFamilyMembers(currentUser.chapterId, currentUser["Member ID"], updatedFamily);
     setSavingFamily(false);
     if (res.success) {
       setShowFamilyModal(false);
+      setEditFamilyMemberIndex(null);
       setFamilyForm({ name: '', relation: '', birthday: '', isRotarian: false, rotaryId: '' });
       
       // Update local storage so the reload sees the new data
@@ -430,39 +426,27 @@ export const Profile = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         {/* User Card */}
         <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '32px', position: 'relative' }}>
-          <button 
-            onClick={() => {
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-secondary" onClick={() => {
+              setEditingMemberId(currentUser["Member ID"]);
               setEditProfileForm({
-                Mobile: currentUser["Mobile"] || '',
-                Email: currentUser["Email"] || '',
+                Mobile: currentUser.Mobile || '',
+                Email: currentUser.Email || '',
                 "Blood Group": currentUser["Blood Group"] || '',
-                Birthday: toDateInputValue(currentUser["Birthday"]),
-                Anniversary: toDateInputValue(currentUser["Anniversary"])
+                Birthday: currentUser.Birthday || '',
+                Anniversary: currentUser.Anniversary || '',
+                CompanyName: currentUser.CompanyName || '',
+                Industry: currentUser.Industry || '',
+                BusinessDesignation: currentUser.BusinessDesignation || ''
               });
-              setShowEditProfileModal(true);
-            }}
-            style={{ position: 'absolute', top: '24px', right: '24px', background: '#f1f5f9', border: 'none', borderRadius: '50%', padding: '8px', color: 'var(--text-secondary)', cursor: 'pointer' }}
-            title="Edit Profile"
-          >
-            <Edit2 size={16} />
-          </button>
-          
-          <button 
-            className="action-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOldPin('');
-              setNewPin('');
-              setConfirmNewPin('');
-              setPinError('');
-              setPinSuccess('');
-              setShowPinModal(true);
-            }}
-            style={{ position: 'absolute', top: '24px', right: '64px', background: '#f1f5f9', border: 'none', borderRadius: '50%', padding: '8px', color: 'var(--text-secondary)', cursor: 'pointer' }}
-            title="Change PIN"
-          >
-            <Settings size={16} />
-          </button>
+              setShowEditProfile(true);
+            }}>
+              <Edit2 size={16} /> Edit Profile
+            </button>
+            <button className="btn btn-secondary" onClick={() => setShowPinModal(true)}>
+              <Key size={16} /> Change PIN
+            </button>
+          </div>
           
           <div style={{ position: 'relative' }}>
             <Avatar member={currentUser} size={100} style={{ border: '3px solid var(--rotary-gold)', boxShadow: 'var(--shadow-md)', marginBottom: '16px', marginTop: '16px' }} />
@@ -544,6 +528,28 @@ export const Profile = () => {
           </div>
         </div>
 
+        {/* Business Information Card */}
+        <div className="card">
+          <div className="card-title">
+            <Link size={18} style={{ color: 'var(--rotary-gold)' }} />
+            Business Information
+          </div>
+          <div className="member-detail-fields" style={{ borderTop: 'none', paddingTop: 0 }}>
+            <div className="detail-field-row">
+              <span className="detail-field-label">Company Name</span>
+              <span className="detail-field-value">{currentUser["CompanyName"] || "Not Specified"}</span>
+            </div>
+            <div className="detail-field-row">
+              <span className="detail-field-label">Industry</span>
+              <span className="detail-field-value">{currentUser["Industry"] || "Not Specified"}</span>
+            </div>
+            <div className="detail-field-row">
+              <span className="detail-field-label">Designation</span>
+              <span className="detail-field-value">{currentUser["BusinessDesignation"] || "Not Specified"}</span>
+            </div>
+          </div>
+        </div>
+
         {/* Family Members Card */}
         <div className="card">
           <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -552,7 +558,11 @@ export const Profile = () => {
               Family Members
             </div>
             <button 
-              onClick={() => setShowFamilyModal(true)}
+              onClick={() => {
+                setEditFamilyMemberIndex(null);
+                setFamilyForm({ name: '', relation: '', birthday: '', isRotarian: false, rotaryId: '' });
+                setShowFamilyModal(true);
+              }}
               className="btn btn-secondary" 
               style={{ padding: '4px 8px', fontSize: '12px', height: 'auto' }}
             >
@@ -590,6 +600,20 @@ export const Profile = () => {
                     <div style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-secondary)', textAlign: 'center', background: '#f1f5f9', padding: '4px 10px', borderRadius: '16px' }}>
                       {fm.relation}
                     </div>
+
+                    {!platformMember && (
+                      <button 
+                        onClick={() => {
+                          setEditFamilyMemberIndex(idx);
+                          setFamilyForm(fm);
+                          setShowFamilyModal(true);
+                        }}
+                        style={{ marginTop: '12px', padding: '4px 8px', fontSize: '12px' }}
+                        className="btn btn-secondary"
+                      >
+                        <Edit2 size={12} style={{ marginRight: '4px' }} /> Edit
+                      </button>
+                    )}
                     
                     <button 
                       onClick={() => handleRemoveFamilyMember(idx)} 
@@ -614,50 +638,190 @@ export const Profile = () => {
             <Award size={18} style={{ color: 'var(--rotary-blue)' }} />
             Trophy Case
           </div>
-          <div style={{ padding: '16px' }}>
-            {currentUser.badges && currentUser.badges.length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
-                {currentUser.badges.map((badge, idx) => (
-                  <div key={idx} style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    alignItems: 'center', 
-                    background: '#ffffff', 
-                    border: '1px solid var(--border-color)', 
-                    padding: '16px', 
-                    borderRadius: '12px', 
-                    minWidth: '120px', 
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-                    textAlign: 'center'
-                  }}>
-                    {badge.image ? (
-                      <img 
-                        src={badge.image} 
-                        alt={badge.name} 
-                        style={{ width: '64px', height: '64px', marginBottom: '12px', objectFit: 'contain' }} 
-                      />
-                    ) : (
-                      <div style={{
-                        width: '64px', height: '64px', borderRadius: '50%', background: 'var(--rotary-gold)', 
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '12px'
-                      }}>
-                        <Award size={32} />
-                      </div>
-                    )}
-                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px', marginBottom: '4px' }}>
-                      {badge.name}
-                    </div>
-                    {badge.description && (
-                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                        {badge.description}
-                      </div>
-                    )}
-                  </div>
-                ))}
+          <div style={{ padding: '0 16px 16px 16px' }}>
+            <div style={{ marginBottom: '20px', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <Info size={16} style={{ color: 'var(--rotary-blue)' }} /> How to earn trophies
               </div>
-            ) : (
-              <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>No badges earned yet. Participate in events and activities to earn badges!</p>
-            )}
+              <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <li><strong>Early Bird:</strong> You get this trophy the moment you pay any outstanding club dues.</li>
+                <li><strong>Philanthropist:</strong> Awarded automatically if you make a payment where the purpose is logged as a "donation" or "charity".</li>
+                <li><strong>Active Participant:</strong> You earn this as soon as you are marked as "Present" for at least one meeting or event in the attendance register.</li>
+                <li><strong>Opinion Leader:</strong> Awarded automatically if you submit any feedback or share an opinion through the app.</li>
+              </ul>
+            </div>
+            {(() => {
+              const displayUser = data?.members?.find(m => String(m["Member ID"] || m.id) === String(currentUser?.["Member ID"] || currentUser?.id)) || currentUser;
+              
+              if (displayUser.badges && displayUser.badges.length > 0) {
+                const groupedBadgesMap = displayUser.badges.reduce((acc, badge) => {
+                  if (!acc[badge.name]) {
+                    acc[badge.name] = { ...badge, count: 0, dates: [] };
+                  }
+                  acc[badge.name].count += 1;
+                  if (badge.date) {
+                    acc[badge.name].dates.push(badge.date);
+                  }
+                  return acc;
+                }, {});
+                const uniqueBadges = Object.values(groupedBadgesMap);
+                const badgeStyleVersion = globalConfig?.badgeStyleVersion || 'v2';
+
+                return (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', justifyContent: 'center' }}>
+                    {uniqueBadges.map((badge, idx) => (
+                      <div 
+                        key={idx} 
+                        onClick={() => setSelectedBadgeForDates(badge)}
+                        style={badgeStyleVersion === 'v1' ? { 
+                          flex: '0 1 180px', 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          alignItems: 'center', 
+                          background: '#ffffff', 
+                          border: '1px solid var(--border-color)', 
+                          padding: '24px 16px', 
+                          borderRadius: '16px', 
+                          minWidth: '160px', 
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+                          textAlign: 'center',
+                          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                          cursor: 'pointer',
+                          position: 'relative'
+                        } : { 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          alignItems: 'center', 
+                          width: '120px',
+                          textAlign: 'center',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {badgeStyleVersion === 'v1' ? (
+                          <>
+                            {badge.count > 0 && (
+                              <div style={{
+                                position: 'absolute',
+                                top: '-8px',
+                                right: '-8px',
+                                background: 'var(--rotary-gold)',
+                                color: '#fff',
+                                borderRadius: '50%',
+                                width: '24px',
+                                height: '24px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                                zIndex: 10
+                              }}>
+                                {badge.count}
+                              </div>
+                            )}
+                            {badge.image ? (
+                              <div style={{ width: '80px', height: '80px', marginBottom: '16px', position: 'relative' }}>
+                                <img 
+                                  src={badge.image} 
+                                  alt={badge.name} 
+                                  style={{ width: '100%', height: '100%', objectFit: 'contain', filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.1))' }} 
+                                />
+                              </div>
+                            ) : (
+                              <div style={{
+                                width: '64px', height: '64px', borderRadius: '50%', background: 'var(--rotary-gold)', 
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '12px'
+                              }}>
+                                <Award size={32} />
+                              </div>
+                            )}
+                            <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '14px', marginBottom: '8px', lineHeight: '1.2' }}>
+                              {badge.name}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{
+                              width: '120px',
+                              height: '120px',
+                              borderRadius: '50%',
+                              background: '#000000',
+                              border: '2px solid var(--rotary-gold)',
+                              boxShadow: '0 6px 16px rgba(0,0,0,0.15)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              position: 'relative',
+                              marginBottom: '24px',
+                              padding: '0px',
+                              boxSizing: 'border-box'
+                            }}>
+                              {badge.count > 0 && (
+                                <div style={{
+                                  position: 'absolute',
+                                  top: '0px',
+                                  right: '0px',
+                                  background: 'var(--rotary-gold)',
+                                  color: '#fff',
+                                  borderRadius: '50%',
+                                  width: '26px',
+                                  height: '26px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '13px',
+                                  fontWeight: 'bold',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                                  zIndex: 10,
+                                  border: '2px solid #000'
+                                }}>
+                                  {badge.count}
+                                </div>
+                              )}
+                              {badge.image ? (
+                                <img 
+                                  src={badge.image} 
+                                  alt={badge.name} 
+                                  style={{ width: '100%', height: '100%', objectFit: 'contain', filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.3))' }} 
+                                />
+                              ) : (
+                                <div style={{
+                                  width: '100%', height: '100%', borderRadius: '50%', background: '#000000', 
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotary-gold)'
+                                }}>
+                                  <Award size={48} />
+                                </div>
+                              )}
+                              <div style={{
+                                position: 'absolute',
+                                bottom: '-12px',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                background: '#1a1a1a',
+                                border: '1px solid var(--rotary-gold)',
+                                color: '#fff',
+                                padding: '4px 12px',
+                                borderRadius: '20px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                                zIndex: 5
+                              }}>
+                                {badge.name}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              } else {
+                return <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>No trophies earned yet. Complete activities to earn them!</p>;
+              }
+            })()}
 
             {/* Endorsements List */}
             {currentUser.endorsements && currentUser.endorsements.length > 0 && (
@@ -684,13 +848,22 @@ export const Profile = () => {
           <div style={{ padding: '16px' }}>
             {activities.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {activities.map(act => (
+                {activities.slice(0, 5).map(act => (
                   <div key={act.id} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
                     <div style={{ fontWeight: 'bold', fontSize: '14px', color: 'var(--text-primary)' }}>{act.title}</div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>{act.description}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>{new Date(act.timestamp).toLocaleString()}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>{act.description || (act.amount ? `₹${act.amount}` : '')}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>{new Date(act.timestamp || act.date).toLocaleString()}</div>
                   </div>
                 ))}
+                {activities.length > 5 && (
+                  <button 
+                    className="btn btn-secondary" 
+                    style={{ width: '100%', marginTop: '8px' }}
+                    onClick={() => setShowAllActivitiesModal(true)}
+                  >
+                    View All Activities ({activities.length})
+                  </button>
+                )}
               </div>
             ) : (
               <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '13px', textAlign: 'center' }}>No activities recorded yet.</p>
@@ -709,12 +882,12 @@ export const Profile = () => {
 
       </div>
 
-      {/* Add Family Member Modal */}
+      {/* Add/Edit Family Member Modal */}
       <Modal
         isOpen={showFamilyModal}
         onClose={() => setShowFamilyModal(false)}
-        title="Add Family Member"
-        subtitle="Link a spouse or child to your profile."
+        title={editFamilyMemberIndex !== null ? "Edit Family Member" : "Add Family Member"}
+        subtitle={editFamilyMemberIndex !== null ? "Update details for this family member." : "Link a spouse or child to your profile."}
         footer={
           <>
             <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowFamilyModal(false)}>Cancel</button>
@@ -724,14 +897,16 @@ export const Profile = () => {
           </>
         }
       >
-        <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
-          <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-            <input type="radio" checked={linkMode === 'manual'} onChange={() => { setLinkMode('manual'); setSelectedMemberId(''); setMemberSearchQuery(''); }} /> Add Manually
-          </label>
-          <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-            <input type="radio" checked={linkMode === 'existing'} onChange={() => { setLinkMode('existing'); setMemberSearchQuery(''); }} /> Link Existing Member
-          </label>
-        </div>
+        {editFamilyMemberIndex === null && (
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+            <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input type="radio" checked={linkMode === 'manual'} onChange={() => { setLinkMode('manual'); setSelectedMemberId(''); setMemberSearchQuery(''); }} /> Add Manually
+            </label>
+            <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input type="radio" checked={linkMode === 'existing'} onChange={() => { setLinkMode('existing'); setMemberSearchQuery(''); }} /> Link Existing Member
+            </label>
+          </div>
+        )}
 
         {linkMode === 'existing' && (
           <div className="form-group" style={{ marginBottom: '16px', position: 'relative' }}>
@@ -821,10 +996,12 @@ export const Profile = () => {
           )}
         </div>
 
-        <div className="form-group" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <input type="checkbox" checked={familyForm.isRotarian} onChange={e => setFamilyForm({...familyForm, isRotarian: e.target.checked})} id="isRot" disabled={linkMode === 'existing' && !!selectedMemberId} />
-          <label htmlFor="isRot" style={{ fontSize: '14px' }}>Is this person a Rotarian?</label>
-        </div>
+        {editFamilyMemberIndex === null && (
+          <div className="form-group" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input type="checkbox" checked={familyForm.isRotarian} onChange={e => setFamilyForm({...familyForm, isRotarian: e.target.checked})} id="isRot" disabled={linkMode === 'existing' && !!selectedMemberId} />
+            <label htmlFor="isRot" style={{ fontSize: '14px' }}>Is this person a Rotarian?</label>
+          </div>
+        )}
 
         {familyForm.isRotarian && (
           <div className="form-group" style={{ marginBottom: '24px' }}>
@@ -933,13 +1110,13 @@ export const Profile = () => {
 
       {/* Edit Profile Modal */}
       <Modal
-        isOpen={showEditProfileModal}
-        onClose={() => setShowEditProfileModal(false)}
+        isOpen={showEditProfile}
+        onClose={() => { setShowEditProfile(false); setEditingMemberId(null); }}
         title="Edit Profile"
         subtitle="Update your personal details and avatar."
         footer={
           <>
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowEditProfileModal(false)}>Cancel</button>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowEditProfile(false)}>Cancel</button>
             <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveProfile} disabled={savingProfile}>
               {savingProfile ? 'Saving...' : 'Save Profile'}
             </button>
@@ -1010,6 +1187,79 @@ export const Profile = () => {
         <div className="form-group" style={{ marginBottom: '24px' }}>
           <label className="form-label">Anniversary</label>
           <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Anniversary} onChange={e => setEditProfileForm({...editProfileForm, Anniversary: e.target.value})} />
+        </div>
+
+        <div style={{ marginBottom: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#334155', marginBottom: '12px' }}>Business Information</h3>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Company Name</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="e.g. Acme Corp" value={editProfileForm.CompanyName} onChange={e => setEditProfileForm({...editProfileForm, CompanyName: e.target.value})} />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Industry</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="e.g. Real Estate, Healthcare" value={editProfileForm.Industry} onChange={e => setEditProfileForm({...editProfileForm, Industry: e.target.value})} />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '24px' }}>
+          <label className="form-label">Designation</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="e.g. CEO, Founder" value={editProfileForm.BusinessDesignation} onChange={e => setEditProfileForm({...editProfileForm, BusinessDesignation: e.target.value})} />
+        </div>
+      </Modal>
+
+      {selectedBadgeForDates && (
+        <Modal isOpen={true} title={`${selectedBadgeForDates.name} Earned Dates`} onClose={() => setSelectedBadgeForDates(null)}>
+          <div style={{ padding: '20px' }}>
+            {selectedBadgeForDates.dates && selectedBadgeForDates.dates.length > 0 ? (
+              <ul style={{ paddingLeft: '20px', margin: 0 }}>
+                {selectedBadgeForDates.dates.map((date, idx) => (
+                  <li key={idx} style={{ marginBottom: '8px', fontSize: '14px' }}>
+                    {date ? new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Unknown Date'}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>No specific dates recorded for this trophy.</p>
+            )}
+          </div>
+          <div className="modal-footer" style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+            <button className="btn btn-secondary" onClick={() => setSelectedBadgeForDates(null)}>Close</button>
+          </div>
+        </Modal>
+      )}
+
+      <Modal 
+        isOpen={showAllActivitiesModal} 
+        onClose={() => setShowAllActivitiesModal(false)}
+        title="My Activities"
+        subtitle="All your recorded activities and interactions"
+      >
+        <div style={{ padding: '16px 0', maxHeight: '60vh', overflowY: 'auto' }}>
+          {activities.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {activities.map((act) => (
+                <div key={act.id} style={{ background: 'var(--bg-tertiary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '15px', marginBottom: '4px' }}>{act.title}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{act.description}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{new Date(act.timestamp || act.date).toLocaleString()}</div>
+                  </div>
+                  {act.amount && (
+                    <div style={{ fontWeight: 700, color: 'var(--rotary-blue)', fontSize: '15px' }}>
+                      ₹{act.amount}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No activities found.</p>
+          )}
+        </div>
+        <div className="modal-footer" style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+          <button className="btn btn-secondary" onClick={() => setShowAllActivitiesModal(false)}>Close</button>
         </div>
       </Modal>
 

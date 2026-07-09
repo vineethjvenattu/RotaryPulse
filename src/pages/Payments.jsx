@@ -133,6 +133,9 @@ export const Payments = ({ data, loading, refreshData }) => {
 
   const sortPayments = (list) => {
     return [...list].sort((a, b) => {
+      if (a["Status"] === "Verification Pending" && b["Status"] !== "Verification Pending") return -1;
+      if (b["Status"] === "Verification Pending" && a["Status"] !== "Verification Pending") return 1;
+
       let valA, valB;
       if (sortField === 'Amount') {
         valA = Number(a["Amount"] || 0);
@@ -363,7 +366,7 @@ export const Payments = ({ data, loading, refreshData }) => {
   const handleProposeWaiver = async (p) => {
     if (!window.confirm(`Propose to waive this fee of ₹${p["Amount"]} for ${p["Member Name"]}? This requires approval from the other two committee members.`)) return;
     try {
-      const result = await api.proposePaymentWaiver(p["Payment ID"], p["Amount"], currentUser, members);
+      const result = await api.proposePaymentWaiver(p["Payment ID"], p["Amount"], currentUser, members, p["Member ID"]);
       if (result.success) {
         await refreshData();
         alert('Waiver proposed successfully. Waiting for committee approval.');
@@ -532,10 +535,10 @@ export const Payments = ({ data, loading, refreshData }) => {
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-start' }}>
                   <button
                     className="btn btn-primary"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px', backgroundColor: 'var(--success)', borderColor: 'var(--success)' }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 24px', backgroundColor: 'var(--success)', borderColor: 'var(--success)' }}
                     onClick={() => handleApprove(edit.id)}
                     disabled={!!approvalBusy}
                   >
@@ -543,7 +546,7 @@ export const Payments = ({ data, loading, refreshData }) => {
                   </button>
                   <button
                     className="btn btn-secondary"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px', color: 'var(--error)', borderColor: 'var(--error)' }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 24px', color: 'var(--error)', borderColor: 'var(--error)' }}
                     onClick={() => handleReject(edit.id)}
                     disabled={!!approvalBusy}
                   >
@@ -679,7 +682,7 @@ export const Payments = ({ data, loading, refreshData }) => {
                     {p["Status"] === "Verification Pending" ? (
                       <>
                         <span className="payment-status-badge pending" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}>Verifying</span>
-                        {isCommittee && (
+                        {isCommittee && p["Member ID"] !== myId && (
                           <>
                             <button onClick={() => api.verifyPayment(p["Payment ID"]).then(() => refreshData())} className="btn btn-primary" style={{ padding: '6px 10px', fontSize: '11px', background: 'var(--success)', border: 'none' }}>Approve</button>
                             <button onClick={() => api.rejectPaymentVerification(p["Payment ID"]).then(() => refreshData())} className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '11px', color: 'var(--error)' }}>Reject</button>
@@ -802,8 +805,8 @@ export const Payments = ({ data, loading, refreshData }) => {
             <div style={{ width: 60, height: 60, borderRadius: '50%', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
               <Check size={36} />
             </div>
-            <h3 style={{ color: 'var(--success)' }}>Payment Successful!</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Updating records. Please wait...</p>
+            <h3 style={{ color: 'var(--success)' }}>Verification Pending</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>Your payment reference has been submitted and is pending PST verification.</p>
           </div>
         ) : (
           <form id="pay-now-form" onSubmit={handleProcessPayment}>

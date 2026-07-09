@@ -27,9 +27,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
   const [savingDesignations, setSavingDesignations] = useState(false);
 
   // Settings State
-  const [fbPageId, setFbPageId] = useState('');
-  const [fbAccessToken, setFbAccessToken] = useState('');
-  const [upiId, setUpiId] = useState('');
+  const [referralBonusAmount, setReferralBonusAmount] = useState('');
   const [allowedMemberCardFields, setAllowedMemberCardFields] = useState([]);
   const [showRelations, setShowRelations] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -109,20 +107,16 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
     // Fetch chapter settings
     const chapterRes = await api.getChapterData(chapterId);
     if (chapterRes.success && chapterRes.data) {
-      setFbPageId(chapterRes.data.fbPageId || '');
-      setFbAccessToken(chapterRes.data.fbAccessToken || '');
-      setUpiId(chapterRes.data.upiId || '');
-      setAllowedMemberCardFields(chapterRes.data.allowedMemberCardFields || []);
-      setShowRelations(chapterRes.data.showRelations || false);
+      const { data: chapterData } = chapterRes;
+      setReferralBonusAmount(chapterData.referralBonusAmount || '');
+      setAllowedMemberCardFields(chapterData.allowedMemberCardFields || []);
+      setShowRelations(!!chapterData.showRelations);
     }
     // Fetch members for this chapter
     const memRes = await api.getChapterMembers(chapterId);
     if (memRes.success) {
       const getRank = (role) => {
         if (!role || role === 'Member') return 99;
-        const confRes = globalRoles || []; // Fallback, though we know it's fetched
-        // Wait, globalRoles might not be populated in time because state setter setGlobalRoles is async in React and we are still in the same fetchData execution block.
-        // But we have configRes from lines above. Let's use it.
         const gRoles = configRes && configRes.success && configRes.config.roles ? configRes.config.roles : ['President', 'Secretary', 'Treasurer'];
         const idx = gRoles.indexOf(role);
         if (idx !== -1) return idx + 1;
@@ -142,9 +136,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
   const handleSaveSettings = async () => {
     setSavingSettings(true);
     const res = await api.updateChapterSettings(chapterId, { 
-      fbPageId, 
-      fbAccessToken, 
-      upiId,
+      referralBonusAmount,
       allowedMemberCardFields,
       showRelations
     });
@@ -363,47 +355,18 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
         border: '1px solid var(--border-color)',
         marginBottom: '32px'
       }}>
-        <h4 style={{ margin: '0 0 16px 0', color: 'var(--text-primary)', fontSize: '16px' }}>Facebook Gallery Configuration</h4>
-        <p style={{ margin: '0 0 20px 0', color: 'var(--text-secondary)', fontSize: '13px' }}>
-          Connect your chapter's Facebook Page to dynamically load photos into the Gallery. You will need a Long-Lived Page Access Token.
-        </p>
-        
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Facebook Page ID</label>
+            <label className="form-label">Referral Bonus Amount (₹)</label>
             <input 
-              type="text" 
+              type="number" 
               className="form-input" 
-              placeholder="e.g. 1206764219182291"
-              value={fbPageId}
-              onChange={(e) => setFbPageId(e.target.value)}
-              style={{ width: '100%', maxWidth: '400px' }}
+              placeholder="e.g. 500"
+              value={referralBonusAmount}
+              onChange={(e) => setReferralBonusAmount(e.target.value)}
+              style={{ width: '100%', maxWidth: '200px' }}
             />
           </div>
-          
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Facebook Page Access Token</label>
-            <input 
-              type="password" 
-              className="form-input" 
-              placeholder="EAAOxxxxx..."
-              value={fbAccessToken}
-              onChange={(e) => setFbAccessToken(e.target.value)}
-              style={{ width: '100%', maxWidth: '600px' }}
-            />
-          </div>
-
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Club UPI ID</label>
-            <input 
-              type="text" 
-              className="form-input" 
-              placeholder="e.g. rotaryclub@ybl"
-              value={upiId}
-              onChange={(e) => setUpiId(e.target.value)}
-              style={{ width: '100%', maxWidth: '400px' }}
-            />
-        </div>
         
         <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '24px 0' }} />
         
@@ -457,7 +420,7 @@ export function ChapterProfile({ chapterId, chapterName, onBack }) {
         </button>
       </div>
 
-      <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px', borderBottom: '2px solid var(--border-color)', paddingBottom: '8px' }}>Chapter Leadership Roles</h3>
+      <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px', borderBottom: '2px solid var(--border-color)', paddingBottom: '8px' }}>Club Leadership Roles</h3>
       
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px', marginBottom: '32px' }}>
         {globalRoles.map(role => {

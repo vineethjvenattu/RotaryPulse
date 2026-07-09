@@ -79,6 +79,13 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
   const [convertingLoading, setConvertingLoading] = useState(false);
   const [convertError, setConvertError] = useState('');
 
+  // Modification Workflow State
+  const [editingOpinion, setEditingOpinion] = useState(null);
+  const [editProposedText, setEditProposedText] = useState('');
+  const [editProposedDetails, setEditProposedDetails] = useState('');
+  const [editModLoading, setEditModLoading] = useState(false);
+  const [editModError, setEditModError] = useState('');
+
   // Initialize selected event
   useEffect(() => {
     if (events.length > 0 && !selectedEventId) {
@@ -472,6 +479,59 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
     }
   };
 
+  // Modification Handlers
+  const handleRequestDelete = async (opinionId) => {
+    if (!window.confirm("Are you sure you want to request deletion of this item? Another PST member will need to approve it.")) return;
+    await api.requestDeleteOpinion(opinionId, currentUser["Member ID"], currentUser["Name"]);
+    await refreshData();
+  };
+
+  const handleApproveDelete = async (opinionId) => {
+    await api.approveDeleteOpinion(opinionId, currentUser["Member ID"]);
+    await refreshData();
+  };
+
+  const handleRejectDelete = async (opinionId) => {
+    await api.rejectDeleteOpinion(opinionId);
+    await refreshData();
+  };
+
+  const handleRequestEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingOpinion) return;
+    setEditModError('');
+    setEditModLoading(true);
+    try {
+      const result = await api.requestEditOpinion(
+        editingOpinion["Opinion ID"],
+        currentUser["Member ID"],
+        currentUser["Name"],
+        editProposedText,
+        editProposedDetails
+      );
+      if (result.success) {
+        setEditingOpinion(null);
+        await refreshData();
+      } else {
+        setEditModError(result.error);
+      }
+    } catch (err) {
+      setEditModError(err.toString());
+    } finally {
+      setEditModLoading(false);
+    }
+  };
+
+  const handleApproveEdit = async (opinionId) => {
+    await api.approveEditOpinion(opinionId, currentUser["Member ID"]);
+    await refreshData();
+  };
+
+  const handleRejectEdit = async (opinionId) => {
+    await api.rejectEditOpinion(opinionId);
+    await refreshData();
+  };
+
   return (
     <div className="content-area animate-fade-in">
       <div className="page-header">
@@ -845,7 +905,7 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
                                 {o["Action Details"]}
                               </div>
                             )}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', flexWrap: 'wrap', gap: '8px' }}>
                               <button 
                                 onClick={() => handleVoteOpinion(o["Opinion ID"])}
                                 style={{ 
@@ -866,15 +926,54 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
                                 {(o.votes || []).length > 0 ? (o.votes || []).length : 'Vote'}
                               </button>
                               
-                              {(o["Action Required"] !== 'Yes' || !o["Action Status"] || o["Action Status"] === 'Pending') && (isPresident || isSecretary || isTreasurer) && (
-                                <button 
-                                  className="btn btn-secondary"
-                                  style={{ fontSize: '11px', padding: '4px 10px' }}
-                                  onClick={() => setConvertingOpinion(o)}
-                                >
-                                  Convert to Action Item
-                                </button>
-                              )}
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                {o.deletionRequestedBy ? (
+                                  o.deletionRequestedBy === currentUser?.["Member ID"] ? (
+                                    <span style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '4px 8px', borderRadius: '4px' }}>Deletion Pending Approval</span>
+                                  ) : (isPresident || isSecretary || isTreasurer) && (
+                                    <>
+                                      <button onClick={() => handleApproveDelete(o["Opinion ID"])} className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '11px', background: 'var(--error)', borderColor: 'var(--error)' }}>Approve Delete</button>
+                                      <button onClick={() => handleRejectDelete(o["Opinion ID"])} className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '11px' }}>Reject Delete</button>
+                                    </>
+                                  )
+                                ) : o.editRequestedBy ? (
+                                  o.editRequestedBy === currentUser?.["Member ID"] ? (
+                                    <span style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '4px 8px', borderRadius: '4px' }}>Edit Pending Approval</span>
+                                  ) : (isPresident || isSecretary || isTreasurer) && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#fffbeb', padding: '8px', borderRadius: '4px', border: '1px solid #fde68a', fontSize: '11px' }}>
+                                      <div style={{ fontWeight: 600 }}>Proposed Edit by {o.editRequestedByName}:</div>
+                                      <div>"{o.proposedText}"</div>
+                                      {o.proposedDetails && <div style={{ color: 'var(--error)' }}>{o.proposedDetails}</div>}
+                                      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                                        <button onClick={() => handleApproveEdit(o["Opinion ID"])} className="btn btn-primary" style={{ padding: '2px 8px', fontSize: '10px' }}>Approve Edit</button>
+                                        <button onClick={() => handleRejectEdit(o["Opinion ID"])} className="btn btn-secondary" style={{ padding: '2px 8px', fontSize: '10px' }}>Reject Edit</button>
+                                      </div>
+                                    </div>
+                                  )
+                                ) : (
+                                  <>
+                                    {(o["Action Required"] !== 'Yes' || !o["Action Status"] || o["Action Status"] === 'Pending') && (isPresident || isSecretary || isTreasurer) && (
+                                      <button 
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '11px', padding: '4px 10px' }}
+                                        onClick={() => setConvertingOpinion(o)}
+                                      >
+                                        Convert to Action Item
+                                      </button>
+                                    )}
+                                    {(isPresident || isSecretary || isTreasurer) && (
+                                      <>
+                                        <button onClick={() => {
+                                          setEditingOpinion(o);
+                                          setEditProposedText(o["Opinion Text"] || '');
+                                          setEditProposedDetails(o["Action Details"] || '');
+                                        }} className="btn btn-secondary" style={{ fontSize: '11px', padding: '4px 8px' }}>✏️ Edit</button>
+                                        <button onClick={() => handleRequestDelete(o["Opinion ID"])} className="btn btn-secondary" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--error)', borderColor: 'var(--error)' }}>🗑️ Delete</button>
+                                      </>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -959,13 +1058,49 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
                                     <button onClick={() => handleToggleOpinionActionStatus(t.originalOpinion, t["Status"], t.isAssignee)} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>
                                       Approve
                                     </button>
-                                    <button onClick={(e) => { e.stopPropagation(); handleRejectOpinionAction(t.originalOpinion, e); }} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                                    <button onClick={(e) => { e.stopPropagation(); handleRejectOpinionAction(t.originalOpinion, e); }} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--error)', borderColor: 'var(--error)' }}>
                                       Reject
                                     </button>
                                     <button onClick={() => setConvertingOpinion(t.originalOpinion)} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px' }}>
                                       Reassign
                                     </button>
                                   </>
+                                )}
+                                
+                                {t.originalOpinion.deletionRequestedBy ? (
+                                  t.originalOpinion.deletionRequestedBy === currentUser?.["Member ID"] ? (
+                                    <span style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '4px 8px', borderRadius: '4px' }}>Deletion Pending</span>
+                                  ) : (isPresident || isSecretary || isTreasurer) && (
+                                    <>
+                                      <button onClick={() => handleApproveDelete(t.originalOpinion["Opinion ID"])} className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '11px', background: 'var(--error)', borderColor: 'var(--error)' }}>Approve Delete</button>
+                                      <button onClick={() => handleRejectDelete(t.originalOpinion["Opinion ID"])} className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '11px' }}>Reject Delete</button>
+                                    </>
+                                  )
+                                ) : t.originalOpinion.editRequestedBy ? (
+                                  t.originalOpinion.editRequestedBy === currentUser?.["Member ID"] ? (
+                                    <span style={{ fontSize: '11px', color: '#f59e0b', backgroundColor: '#fef3c7', padding: '4px 8px', borderRadius: '4px' }}>Edit Pending</span>
+                                  ) : (isPresident || isSecretary || isTreasurer) && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#fffbeb', padding: '8px', borderRadius: '4px', border: '1px solid #fde68a', fontSize: '11px', marginTop: '4px', width: '100%' }}>
+                                      <div style={{ fontWeight: 600 }}>Proposed Edit by {t.originalOpinion.editRequestedByName}:</div>
+                                      <div>"{t.originalOpinion.proposedText}"</div>
+                                      {t.originalOpinion.proposedDetails && <div style={{ color: 'var(--error)' }}>{t.originalOpinion.proposedDetails}</div>}
+                                      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                                        <button onClick={() => handleApproveEdit(t.originalOpinion["Opinion ID"])} className="btn btn-primary" style={{ padding: '2px 8px', fontSize: '10px' }}>Approve Edit</button>
+                                        <button onClick={() => handleRejectEdit(t.originalOpinion["Opinion ID"])} className="btn btn-secondary" style={{ padding: '2px 8px', fontSize: '10px' }}>Reject Edit</button>
+                                      </div>
+                                    </div>
+                                  )
+                                ) : (
+                                  (isPresident || isSecretary || isTreasurer) && (
+                                    <>
+                                      <button onClick={() => {
+                                        setEditingOpinion(t.originalOpinion);
+                                        setEditProposedText(t.originalOpinion["Opinion Text"] || '');
+                                        setEditProposedDetails(t.originalOpinion["Action Details"] || '');
+                                      }} className="btn btn-secondary" style={{ fontSize: '11px', padding: '4px 8px' }}>✏️ Edit</button>
+                                      <button onClick={() => handleRequestDelete(t.originalOpinion["Opinion ID"])} className="btn btn-secondary" style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--error)', borderColor: 'var(--error)' }}>🗑️ Delete</button>
+                                    </>
+                                  )
                                 )}
                               </>
                             ) : (
@@ -1098,6 +1233,68 @@ export const MeetingConsole = ({ data, loading, refreshData }) => {
                               ))}
                             </select>
                           </div>
+                        </form>
+                      </div>
+                    </Modal>
+
+                    <Modal
+                      isOpen={!!editingOpinion}
+                      onClose={() => setEditingOpinion(null)}
+                      title="Propose Edit"
+                      footer={
+                        <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ flex: 1, padding: '10px' }}
+                            onClick={() => setEditingOpinion(null)}
+                            disabled={editModLoading}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            form="edit-opinion-form"
+                            className="btn btn-primary"
+                            style={{ flex: 1, padding: '10px' }}
+                            disabled={editModLoading}
+                          >
+                            {editModLoading ? 'Submitting...' : 'Submit Proposed Edit'}
+                          </button>
+                        </div>
+                      }
+                    >
+                      <div style={{ padding: '4px' }}>
+                        {editModError && (
+                          <div className="login-error" style={{ marginBottom: '16px' }}>
+                            <AlertCircle size={18} />
+                            <span>{editModError}</span>
+                          </div>
+                        )}
+                        <form id="edit-opinion-form" onSubmit={handleRequestEditSubmit}>
+                          <div className="form-group" style={{ marginBottom: '16px' }}>
+                            <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>Proposed Discussion Text / Title *</label>
+                            <textarea
+                              className="form-control"
+                              rows="3"
+                              value={editProposedText}
+                              onChange={(e) => setEditProposedText(e.target.value)}
+                              required
+                            />
+                          </div>
+                          
+                          {editingOpinion && editingOpinion["Action Required"] === 'Yes' && (
+                            <div className="form-group" style={{ marginBottom: '16px' }}>
+                              <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>Proposed Action Details *</label>
+                              <textarea
+                                className="form-control"
+                                rows="3"
+                                value={editProposedDetails}
+                                onChange={(e) => setEditProposedDetails(e.target.value)}
+                                required
+                              />
+                            </div>
+                          )}
                         </form>
                       </div>
                     </Modal>

@@ -16,6 +16,14 @@ import { MeetingConsole } from './pages/MeetingConsole';
 import { SuperAdminDashboard } from './pages/SuperAdminDashboard';
 import { InductLanding } from './pages/InductLanding';
 import { Feedbacks } from './pages/Feedbacks';
+import { ClubDetails } from "./pages/ClubDetails";
+import { Inaugurate } from './pages/Inaugurate';
+import { BusinessDirectory } from './pages/BusinessDirectory';
+import { Marketplace } from './pages/Marketplace';
+import { Subscription } from './pages/Subscription';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import { AwardsManagement } from './pages/AwardsManagement';
+import { FeedbackWidget } from './components/FeedbackWidget';
 import { Calendar, MapPin, Clock, X, Check, CheckSquare } from 'lucide-react';
 import './index.css';
 import logoImg from './assets/rotary-logo.png';
@@ -63,11 +71,10 @@ const SplashScreen = ({ status }) => (
       />
       <h1 className="splash-title">
         <span className="splash-title-white">Rotary</span>
-        <span className="splash-title-gold">Connect</span>
+        <span className="splash-title-gold">Pulse</span>
       </h1>
       <div className="splash-subtitle">
-        <div>Stronger Together,</div>
-        <div>Serving Better</div>
+        The heartbeat of your Rotary Club
       </div>
       <div className="splash-loader-bar">
         <div className="splash-loader-progress"></div>
@@ -84,12 +91,21 @@ const SplashScreen = ({ status }) => (
 
 
 function AppContent() {
+  const isInaugurate = new URLSearchParams(window.location.search).get('page') === 'inaugurate';
+  if (isInaugurate) {
+    return <Inaugurate />;
+  }
+  
+  if (window.location.pathname === '/privacy-policy') {
+    return <PrivacyPolicy />;
+  }
+
   const { currentUser, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const page = params.get('page') || params.get('tab');
     const stored = sessionStorage.getItem('rc_active_tab');
-    const validTabs = ['dashboard', 'members', 'events', 'attendance', 'payments', 'announcements', 'profile', 'gallery', 'meeting-console', 'feedbacks', 'whatsnew'];
+    const validTabs = ['dashboard', 'members', 'events', 'attendance', 'payments', 'announcements', 'profile', 'gallery', 'meeting-console', 'feedbacks', 'whatsnew', 'directory', 'marketplace', 'subscription'];
     if (page && validTabs.includes(page)) return page;
     if (stored && validTabs.includes(stored)) return stored;
     return 'dashboard';
@@ -167,7 +183,9 @@ function AppContent() {
   const [error, setError] = useState(null);
 
   // Enforce landing screen staying minimum 5 seconds
-  const [splashTimeoutFinished, setSplashTimeoutFinished] = useState(false);
+  const [splashTimeoutFinished, setSplashTimeoutFinished] = useState(() => {
+    return new URLSearchParams(window.location.search).get('inaugurated') === 'true';
+  });
 
   // Self check-in state
   const [checkinEventId, setCheckinEventId] = useState(null);
@@ -177,6 +195,7 @@ function AppContent() {
 
   // Enforce minimum 5 seconds splash display
   useEffect(() => {
+    if (splashTimeoutFinished) return;
     const timer = setTimeout(() => {
       setSplashTimeoutFinished(true);
     }, 5000);
@@ -296,7 +315,7 @@ function AppContent() {
 
   // Show splash landing screen for minimum 5 seconds OR while auth session is loading
   if (authLoading || !splashTimeoutFinished) {
-    return <SplashScreen status={authLoading ? "Authorizing session..." : "Loading Rotary Connect..."} />;
+    return <SplashScreen status={authLoading ? "Authorizing session..." : "Loading Rotary Pulse..."} />;
   }
 
   // Handle Induction link
@@ -326,7 +345,16 @@ function AppContent() {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} refreshData={refreshData} />;
+      case 'directory':
+        if (currentUser.subscriptionStatus !== 'Active') return <Subscription />;
+        return <BusinessDirectory data={data} />;
+      case 'marketplace':
+        if (currentUser.subscriptionStatus !== 'Active') return <Subscription />;
+        return <Marketplace data={data} />;
+      case 'subscription':
+        return <Subscription />;
       case 'members':
+        if (currentUser.subscriptionStatus !== 'Active') return <Subscription />;
         return <Members data={data} loading={loading} refreshData={refreshData} />;
       case 'events':
         return <Events data={data} loading={loading} refreshData={refreshData} />;
@@ -337,11 +365,15 @@ function AppContent() {
       case 'announcements':
         return <Announcements data={data} loading={loading} refreshData={refreshData} />;
       case 'profile':
-        return <Profile />;
+        return <Profile data={data} refreshData={refreshData} />;
       case 'gallery':
         return <Gallery />;
       case 'feedbacks':
         return <Feedbacks data={data} loading={loading} refreshData={refreshData} />;
+      case 'club_details':
+        return <ClubDetails />;
+      case 'awards':
+        return <AwardsManagement />;
       case 'meeting-console':
         return <MeetingConsole data={data} loading={loading} refreshData={refreshData} setActiveTab={setActiveTab} />;
       case 'whatsnew':
@@ -455,6 +487,7 @@ function AppContent() {
           </div>
         </div>
       )}
+      <FeedbackWidget currentUser={currentUser} />
     </div>
   );
 }

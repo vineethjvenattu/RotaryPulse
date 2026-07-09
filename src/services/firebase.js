@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getMessaging } from "firebase/messaging";
+import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -19,6 +20,7 @@ let app = null;
 let db = null;
 let storage = null;
 let messaging = null;
+let functions = null;
 
 if (hasConfig) {
   try {
@@ -30,9 +32,11 @@ if (hasConfig) {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
       messaging = getMessaging(app);
     }
+    
+    functions = getFunctions(app);
   } catch (error) {
     console.error("Failed to initialize Firebase:", error);
   }
 }
 
-export { app, db, storage, messaging, hasConfig };
+export { app, db, storage, messaging, functions, hasConfig };

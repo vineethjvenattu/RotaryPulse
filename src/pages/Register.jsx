@@ -14,7 +14,8 @@ export const Register = ({ onBackToLogin }) => {
     mobile: '',
     chapterId: '',
     pin: '',
-    confirmPin: ''
+    confirmPin: '',
+    referralCode: ''
   });
   
   const [error, setError] = useState('');
@@ -61,7 +62,8 @@ export const Register = ({ onBackToLogin }) => {
       Email: formData.email,
       Mobile: formData.mobile,
       chapterId: formData.chapterId,
-      Pin: formData.pin
+      Pin: formData.pin,
+      ReferredBy: formData.referralCode
     });
     
     setLoading(false);
@@ -99,6 +101,7 @@ export const Register = ({ onBackToLogin }) => {
         {error && <div className="login-error"><AlertCircle size={18} /> {error}</div>}
         
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
           <div className="input-group">
             <User className="input-icon" size={20} />
             <input type="text" name="name" className="input-field" placeholder="Full Name" value={formData.name} onChange={handleChange} />
@@ -132,6 +135,21 @@ export const Register = ({ onBackToLogin }) => {
           <div className="input-group">
             <Lock className="input-icon" size={20} />
             <input type="password" name="confirmPin" className="input-field" placeholder="Confirm PIN" value={formData.confirmPin} onChange={handleChange} maxLength={6} />
+          </div>
+          </div>
+
+          <div className="input-group">
+            <div className="input-wrapper">
+              <User size={18} className="input-icon" />
+              <input 
+                type="text" 
+                name="referralCode"
+                placeholder="Referral Code (Optional Member ID)" 
+                className="input-field pl-10"
+                value={formData.referralCode}
+                onChange={handleChange}
+              />
+            </div>
           </div>
 
           <button type="submit" className="login-button" disabled={loading}>

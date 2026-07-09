@@ -1358,33 +1358,7 @@
 
 
 /* Feedback Widget */
-.feedback-btn-floating {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  width: 56px;
-  height: 56px;
-  border-radius: 28px;
-  background-color: var(--rotary-blue);
-  color: white;
-  border: none;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 999;
-  transition: all 0.2s ease;
-}
 
-.feedback-btn-floating:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
-}
-
-@media (max-width: 768px) {
-  .feedback-btn-floating {
-    bottom: calc(var(--bottom-nav-height, 65px) + 24px);
-    right: 16px;
-  }
+@media (min-width: 768px) {
+  .dashboard-mobile-banner { display: none; }
 }

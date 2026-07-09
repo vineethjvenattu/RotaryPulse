@@ -17,7 +17,12 @@ import {
   MoreHorizontal,
   Upload,
   Image,
-  MessageSquare
+  MessageSquare,
+  FileText,
+  Briefcase,
+  Tag,
+  Lock,
+  Award
 } from 'lucide-react';
 import { Avatar } from '../components/Avatar';
 import './Navigation.css';
@@ -146,14 +151,38 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
   // Compute pending approvals count for this user
   const myApprovalCount = React.useMemo(() => {
     if (!currentUser || !data?.paymentEdits) return 0;
-    const COMMITTEE_ROLES = globalConfig?.coreCommitteeRoles || ['President', 'Secretary', 'Treasurer'];
-    if (!COMMITTEE_ROLES.includes(currentUser["Role"])) return 0;
-    return data.paymentEdits.filter(e =>
-      e["Status"] === "pending" &&
-      e["Required Approvers"]?.includes(currentUser["Member ID"]) &&
-      !e["Approvals"]?.includes(currentUser["Member ID"])
-    ).length;
-  }, [data?.paymentEdits, currentUser]);
+    
+    // Are we a PST?
+    const isPST = ["President", "Secretary", "Treasurer"].includes(currentUser.Role);
+    if (!isPST) return 0;
+
+    return data.paymentEdits.filter(edit => {
+      // Must be pending
+      if (edit.Status !== "pending") return false;
+      // We didn't propose it ourselves
+      if (edit["Proposed By"] === currentUser["Member ID"]) return false;
+      // We haven't approved it yet
+      const approvals = edit.Approvals || [];
+      if (approvals.includes(currentUser["Member ID"])) return false;
+
+      return true;
+    }).length;
+  }, [currentUser, data?.paymentEdits]);
+
+  const myClubDetailsApprovalCount = React.useMemo(() => {
+    if (!currentUser || !data?.clubDetailsEdits) return 0;
+    
+    const isPST = ["President", "Secretary", "Treasurer"].includes(currentUser.Role);
+    if (!isPST) return 0;
+
+    return data.clubDetailsEdits.filter(edit => {
+      if (edit.Status !== "pending") return false;
+      if (edit["Proposed By"] === currentUser["Member ID"]) return false;
+      const approvals = edit.Approvals || [];
+      if (approvals.includes(currentUser["Member ID"])) return false;
+      return true;
+    }).length;
+  }, [currentUser, data?.clubDetailsEdits]);
 
   const unacknowledgedFeedbackCount = React.useMemo(() => {
     if (!currentUser || !data?.feedbacks) return 0;
@@ -162,18 +191,31 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
     return data.feedbacks.filter(f => !f.acknowledged).length;
   }, [data?.feedbacks, currentUser, globalConfig]);
 
+  const pendingPaymentsCount = React.useMemo(() => {
+    if (!currentUser || globalConfig.hideBadges || currentUser.isSuperAdmin) return 0;
+    const isPST = currentUser.Role === 'President' || currentUser.Role === 'Secretary' || currentUser.Role === 'Treasurer';
+    if (!isPST) return 0;
+    if (!data?.payments) return 0;
+    return data.payments.filter(p => p["Status"] === "Verification Pending").length;
+  }, [data?.payments, currentUser, globalConfig]);
+
   const navItems = currentUser?.isSuperAdmin ? [
     { id: 'dashboard', label: 'Chapters', icon: Home, visible: true },
+    { id: 'awards', label: 'Award Management', icon: Award, visible: true },
     { id: 'profile', label: 'My Profile', icon: User, visible: !!currentUser["Rotary ID"] }
   ] : [
     { id: 'dashboard', label: 'Home', icon: Home, visible: true },
+    { id: 'directory', label: 'Directory', icon: Briefcase, visible: true },
+    { id: 'marketplace', label: 'Marketplace', icon: Tag, visible: true },
     { id: 'members', label: 'Members', icon: Users, visible: true },
     { id: 'events', label: 'Events', icon: Calendar, visible: true },
     { id: 'attendance', label: 'Attendance', icon: CheckSquare, visible: canMarkAttendance },
     { id: 'payments', label: 'Payments', icon: CreditCard, visible: true },
     { id: 'announcements', label: 'Announcements', icon: Bell, visible: true },
-    { id: 'feedbacks', label: 'User Feedbacks', icon: MessageSquare, visible: currentUser?.isSuperAdmin || (globalConfig?.coreCommitteeRoles || ['President', 'Secretary', 'Treasurer']).includes(currentUser?.["Role"]) },
+    { id: 'feedbacks', label: 'User Feedbacks', icon: MessageSquare, visible: true },
     { id: 'gallery', label: 'Gallery', icon: Image, visible: true },
+    { id: 'club_details', label: 'Club Details', icon: FileText, visible: true },
+    { id: 'awards', label: 'Award Management', icon: Award, visible: currentUser?.Role === 'President' || currentUser?.Role === 'Secretary' || currentUser?.Role === 'Treasurer' },
     { id: 'profile', label: 'My Profile', icon: User, visible: true }
   ];
 
@@ -200,7 +242,7 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
 
   const getActiveTabTitle = () => {
     const active = navItems.find(item => item.id === activeTab);
-    return active ? active.label : 'Rotary Connect';
+    return active ? active.label : 'Rotary Pulse';
   };
 
   const [scrolled, setScrolled] = useState(false);
@@ -225,14 +267,15 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
           />
           <div className="logo-text">
             <h2>Rotary</h2>
-            <span>Connect</span>
+            <span>Pulse</span>
           </div>
         </div>
 
         <div className="nav-links">
           {visibleItems.map((item) => {
             const Icon = item.icon;
-            const showBadge = item.id === 'payments' && myApprovalCount > 0;
+            const badgeCount = item.id === 'payments' ? (myApprovalCount + (pendingPaymentsCount || 0)) : (item.id === 'club_details' ? myClubDetailsApprovalCount : 0);
+            const showBadge = badgeCount > 0;
             return (
               <button
                 key={item.id}
@@ -242,13 +285,16 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
                 <span style={{ position: 'relative', display: 'inline-flex' }}>
                   <Icon size={20} />
                   {showBadge && (
-                    <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>{myApprovalCount}</span>
+                    <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>{badgeCount}</span>
                   )}
                   {item.id === 'feedbacks' && unacknowledgedFeedbackCount > 0 && (
                     <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>{unacknowledgedFeedbackCount}</span>
                   )}
                 </span>
                 {item.label}
+                {currentUser?.subscriptionStatus !== 'Active' && ['directory', 'marketplace', 'members'].includes(item.id) && (
+                  <Lock size={12} style={{ marginLeft: 'auto', color: 'var(--rotary-gold)' }} />
+                )}
               </button>
             );
           })}
@@ -345,7 +391,7 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
         {navItems.filter(item => item.visible && !mobileCoreTabs.map(t => t.id).includes(item.id)).length > 0 && (
           <button
             onClick={handleMobileMoreClick}
-            className={`mobile-nav-item ${showMobileMore || ['attendance', 'payments', 'announcements', 'profile'].includes(activeTab) ? 'active' : ''}`}
+            className={`mobile-nav-item ${showMobileMore || ['attendance', 'payments', 'announcements', 'profile', 'club_details', 'feedbacks'].includes(activeTab) ? 'active' : ''}`}
           >
             {showMobileMore ? <X size={22} /> : <Menu size={22} />}
             More
@@ -360,10 +406,11 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
           <div className="mobile-more-menu">
             {/* Display other items that aren't on mobile core */}
             {navItems
-              .filter(item => item.visible && !['dashboard', 'members', 'events'].includes(item.id))
+              .filter(item => item.visible && !['dashboard', 'members', 'events', 'gallery'].includes(item.id))
               .map((item) => {
                 const Icon = item.icon;
-                const showBadge = item.id === 'payments' && myApprovalCount > 0;
+                const badgeCount = item.id === 'payments' ? (myApprovalCount + (pendingPaymentsCount || 0)) : (item.id === 'club_details' ? myClubDetailsApprovalCount : 0);
+                const showBadge = badgeCount > 0;
                 return (
                   <button
                     key={item.id}
@@ -374,13 +421,16 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
                     <span style={{ position: 'relative', display: 'inline-flex' }}>
                       <Icon size={18} />
                       {showBadge && (
-                        <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{myApprovalCount}</span>
+                        <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: item.id === 'payments' && pendingPaymentsCount > 0 ? 'var(--rotary-gold)' : 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{badgeCount}</span>
                       )}
                       {item.id === 'feedbacks' && unacknowledgedFeedbackCount > 0 && (
                         <span style={{ position: 'absolute', top: -4, right: -6, width: 14, height: 14, borderRadius: '50%', backgroundColor: 'var(--error)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{unacknowledgedFeedbackCount}</span>
                       )}
                     </span>
                     {item.label}
+                    {currentUser?.subscriptionStatus !== 'Active' && ['directory', 'marketplace', 'members'].includes(item.id) && (
+                      <Lock size={12} style={{ marginLeft: 'auto', color: 'var(--rotary-gold)' }} />
+                    )}
                   </button>
                 );
               })}

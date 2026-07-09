@@ -1,5 +1,6 @@
-import { db, storage } from './firebase';
-import { collection, getDocs, getDoc, doc, setDoc, deleteDoc, updateDoc, query, where, writeBatch, deleteField, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { db, storage, functions } from './firebase';
+import { collection, getDocs, getDoc, doc, setDoc, deleteDoc, updateDoc, query, where, writeBatch, deleteField, orderBy, limit, onSnapshot, addDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { calculateMemberBadges } from '../utils/badges';
 
@@ -54,10 +55,11 @@ export const api = {
     let announcementsList = [];
     let paymentEditsList = [];
     let opinionsList = [];
+    let clubDetailsEditsList = [];
 
     if (activeChapterId) {
       try {
-        const [membersSnap, feedbacksSnap, eventsSnap, attendanceSnap, paymentsSnap, announcementsSnap, paymentEditsSnap, opinionsSnap] = await Promise.all([
+        const [membersSnap, feedbacksSnap, eventsSnap, attendanceSnap, paymentsSnap, announcementsSnap, paymentEditsSnap, opinionsSnap, chapterSnap, clubDetailsEditsSnap] = await Promise.all([
           getDocs(collection(db, "chapters", activeChapterId, "members")),
           getDocs(collection(db, "chapters", activeChapterId, "feedbacks")),
           getDocs(collection(db, "chapters", activeChapterId, "events")),
@@ -66,6 +68,8 @@ export const api = {
           getDocs(collection(db, "chapters", activeChapterId, "announcements")),
           getDocs(collection(db, "chapters", activeChapterId, "payment_edits")),
           getDocs(collection(db, "chapters", activeChapterId, "opinions")),
+          getDoc(doc(db, "chapters", activeChapterId)),
+          getDocs(collection(db, "chapters", activeChapterId, "club_details_edits"))
         ]);
 
         membersList = membersSnap.docs.map(doc => {
@@ -81,6 +85,10 @@ export const api = {
         announcementsList = announcementsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         paymentEditsList = paymentEditsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         opinionsList = opinionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        clubDetailsEditsList = clubDetailsEditsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        let chapterData = chapterSnap.exists() ? chapterSnap.data() : {};
+        var chapterConfig = chapterData.clubDetails || {};
 
       } catch (err) {
         console.error("Error fetching data from firebase:", err);
@@ -91,7 +99,7 @@ export const api = {
     // Sort alphabetically by name
     membersList.sort((a, b) => (a.Name || "").localeCompare(b.Name || ""));
 
-    return {
+    const result = {
       success: true,
       data: {
         members: membersList,
@@ -101,7 +109,9 @@ export const api = {
         paymentEdits: paymentEditsList,
         announcements: announcementsList,
         opinions: opinionsList,
-        feedbacks: feedbacksList.sort((a,b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+        feedbacks: feedbacksList.sort((a,b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)),
+        clubDetails: typeof chapterConfig !== 'undefined' ? chapterConfig : {},
+        clubDetailsEdits: clubDetailsEditsList
       }
     };
     
@@ -117,13 +127,8 @@ export const api = {
       
       // Merge with any manually awarded or custom badges in the DB (like Paul Harris Fellow)
       const existingBadges = member.badges || [];
-      const allBadges = [...existingBadges];
-      
-      calculatedBadges.forEach(cb => {
-        if (!allBadges.some(eb => eb.id === cb.id)) {
-          allBadges.push(cb);
-        }
-      });
+      // If we just want all badges, we can just concat them
+      const allBadges = [...existingBadges, ...calculatedBadges];
       
       return { ...member, badges: allBadges };
     });
@@ -250,6 +255,128 @@ export const api = {
     }
   },
 
+
+  // Deletion Workflow
+  requestDeleteOpinion: async (opinionId, memberId, memberName) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      await updateDoc(opinionRef, {
+        deletionRequestedBy: memberId,
+        deletionRequestedByName: memberName,
+        deletionApprovals: []
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  approveDeleteOpinion: async (opinionId, memberId) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      const snap = await getDoc(opinionRef);
+      if (!snap.exists()) return { success: false, error: "Not found" };
+      
+      const data = snap.data();
+      const approvals = data.deletionApprovals || [];
+      if (!approvals.includes(memberId)) approvals.push(memberId);
+      
+      if (approvals.length >= 1) { // 1 additional PST member
+        await deleteDoc(opinionRef);
+      } else {
+        await updateDoc(opinionRef, { deletionApprovals: approvals });
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  rejectDeleteOpinion: async (opinionId) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      await updateDoc(opinionRef, {
+        deletionRequestedBy: deleteField(),
+        deletionRequestedByName: deleteField(),
+        deletionApprovals: deleteField()
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  // Edit Workflow
+  requestEditOpinion: async (opinionId, memberId, memberName, proposedText, proposedDetails) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      await updateDoc(opinionRef, {
+        editRequestedBy: memberId,
+        editRequestedByName: memberName,
+        proposedText: proposedText || null,
+        proposedDetails: proposedDetails || null,
+        editApprovals: []
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  approveEditOpinion: async (opinionId, memberId) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      const snap = await getDoc(opinionRef);
+      if (!snap.exists()) return { success: false, error: "Not found" };
+      
+      const data = snap.data();
+      const approvals = data.editApprovals || [];
+      if (!approvals.includes(memberId)) approvals.push(memberId);
+      
+      if (approvals.length >= 1) { // 1 additional PST member
+        const updates = {
+          editRequestedBy: deleteField(),
+          editRequestedByName: deleteField(),
+          proposedText: deleteField(),
+          proposedDetails: deleteField(),
+          editApprovals: deleteField()
+        };
+        
+        if (data.proposedText) updates["Opinion Text"] = data.proposedText;
+        if (data.proposedDetails) updates["Action Details"] = data.proposedDetails;
+        
+        await updateDoc(opinionRef, updates);
+      } else {
+        await updateDoc(opinionRef, { editApprovals: approvals });
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
+  rejectEditOpinion: async (opinionId) => {
+    try {
+      if (!activeChapterId) throw new Error("No active chapter");
+      const opinionRef = doc(db, "chapters", activeChapterId, "opinions", opinionId);
+      await updateDoc(opinionRef, {
+        editRequestedBy: deleteField(),
+        editRequestedByName: deleteField(),
+        proposedText: deleteField(),
+        proposedDetails: deleteField(),
+        editApprovals: deleteField()
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.toString() };
+    }
+  },
+
   voteOpinion: async (chapterId, opinionId, memberId) => {
     try {
       if (!chapterId) throw new Error("No active chapter");
@@ -273,6 +400,9 @@ export const api = {
       }
       
       await updateDoc(opinionRef, { votes });
+      if (votes.includes(memberId)) {
+        await api.logActivity(chapterId, memberId, "Supported a Motion", `You supported: ${data.Title || "a motion"}`);
+      }
       return { success: true, votes };
     } catch (err) {
       return { success: false, error: err.toString() };
@@ -312,7 +442,13 @@ export const api = {
     try {
       const userId = Date.now().toString();
       const ref = doc(db, "users", userId);
-      await setDoc(ref, { ...userData, "Member ID": userId, status: "pending", Role: "Member" });
+      await setDoc(ref, { 
+        ...userData, 
+        "Member ID": userId, 
+        status: "pending", 
+        Role: "Member",
+        ReferredBy: userData.ReferredBy || ""
+      });
       return { success: true };
     } catch (err) {
       return { success: false, error: err.toString() };
@@ -334,8 +470,40 @@ export const api = {
       const userRef = doc(db, "users", userId);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) return { success: false, error: "Not found" };
+      const userData = userSnap.data();
+
       await updateDoc(userRef, { status: "active" });
-      await setDoc(doc(db, "chapters", activeChapterId, "members", userId), { ...userSnap.data(), status: "active" }, { merge: true });
+      await setDoc(doc(db, "chapters", activeChapterId, "members", userId), { ...userData, status: "active" }, { merge: true });
+
+      // Referral Bonus Logic
+      if (userData.ReferredBy && activeChapterId) {
+        try {
+          const chapRef = doc(db, "chapters", activeChapterId);
+          const chapSnap = await getDoc(chapRef);
+          if (chapSnap.exists()) {
+            const chapData = chapSnap.data();
+            const bonusAmount = Number(chapData.referralBonusAmount);
+            if (!isNaN(bonusAmount) && bonusAmount > 0) {
+              const paymentId = "P" + Date.now();
+              const pRef = doc(db, "chapters", activeChapterId, "payments", paymentId);
+              await setDoc(pRef, {
+                "Payment ID": paymentId,
+                "Member ID": userData.ReferredBy.trim(),
+                "Amount": -Math.abs(bonusAmount),
+                "Category": "Referral Bonus",
+                "Description": `Bonus for referring ${userData.Name}`,
+                "Status": "Paid",
+                "Due Date": new Date().toISOString().split('T')[0],
+                "Paid Date": new Date().toISOString().split('T')[0]
+              });
+              await api.logActivity(activeChapterId, userData.ReferredBy.trim(), "Referral Bonus Earned", `You earned a referral bonus of ₹${bonusAmount} for referring ${userData.Name}.`);
+            }
+          }
+        } catch (e) {
+          console.error("Error processing referral bonus", e);
+        }
+      }
+
       return { success: true };
     } catch (err) {
       return { success: false, error: err.toString() };
@@ -411,7 +579,7 @@ export const api = {
         timestamp: reqId
       };
       await setDoc(doc(db, "chapters", chapterId, "deletion_requests", reqId), reqPayload);
-      await api.logActivity(chapterId, "Requested member deletion", `Requested deletion for ${memberName}`);
+      await api.logActivity(chapterId, memberId, "Requested member deletion", `Requested deletion for ${memberName}`);
       return { success: true, id: reqId };
     } catch (err) {
       return { success: false, error: err.toString() };
@@ -534,18 +702,19 @@ export const api = {
         await updateDoc(ref, { pendingApprovals, approvedBy });
       }
       
-      await api.logActivity(chapterId, "Approved member deletion", `Approved deletion for ${data.userName}`);
+      await api.logActivity(chapterId, data.userId, "Approved member deletion", `Approved deletion for ${data.userName}`);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.toString() };
     }
   },
 
-  logActivity: async (chapterId, action, details) => {
+  logActivity: async (chapterId, userId, title, description) => {
     try {
       await addDoc(collection(db, "chapters", chapterId, "activities"), {
-        action,
-        details,
+        userId,
+        title,
+        description,
         timestamp: new Date().toISOString()
       });
       return { success: true };
@@ -786,6 +955,7 @@ export const api = {
           "Status": item.status,
           "Date": dateStr
         }, { merge: true });
+        await api.logActivity(activeChapterId, item.memberId, "Marked Attendance", `Marked as ${item.status} for ${eventName}`);
       }
       return { success: true };
     } catch (err) {
@@ -974,8 +1144,12 @@ export const api = {
       const coreRoles = (configRes.success && configRes.config && configRes.config.coreCommitteeRoles) ? configRes.config.coreCommitteeRoles : ['President', 'Secretary', 'Treasurer'];
 
       const currentUserId = String(currentUser["Member ID"] || currentUser.id).trim();
+      const targetUserId = original ? String(original["Member ID"]).trim() : null;
       let requiredApprovers = members
-        .filter(m => coreRoles.includes(m.Role) && String(m["Member ID"] || m.id).trim() !== currentUserId)
+        .filter(m => {
+          const mId = String(m["Member ID"] || m.id).trim();
+          return coreRoles.includes(m.Role) && mId !== currentUserId && mId !== targetUserId;
+        })
         .map(m => String(m["Member ID"] || m.id).trim());
 
       const payload = {
@@ -998,7 +1172,7 @@ export const api = {
     }
   },
 
-  proposePaymentWaiver: async (paymentId, amount, currentUser, members) => {
+  proposePaymentWaiver: async (paymentId, amount, currentUser, members, targetMemberId) => {
     if (!activeChapterId) return { success: false, error: "No active chapter" };
     try {
       const editId = `EDIT-${Date.now()}`;
@@ -1007,8 +1181,12 @@ export const api = {
       const coreRoles = (configRes.success && configRes.config && configRes.config.coreCommitteeRoles) ? configRes.config.coreCommitteeRoles : ['President', 'Secretary', 'Treasurer'];
 
       const currentUserId = String(currentUser["Member ID"] || currentUser.id).trim();
+      const targetUserId = targetMemberId ? String(targetMemberId).trim() : null;
       let requiredApprovers = members
-        .filter(m => coreRoles.includes(m.Role) && String(m["Member ID"] || m.id).trim() !== currentUserId)
+        .filter(m => {
+          const mId = String(m["Member ID"] || m.id).trim();
+          return coreRoles.includes(m.Role) && mId !== currentUserId && mId !== targetUserId;
+        })
         .map(m => String(m["Member ID"] || m.id).trim());
 
       const payload = {
@@ -1092,10 +1270,15 @@ export const api = {
     if (!activeChapterId) return { success: false, error: "No active chapter" };
     try {
       const pRef = doc(db, "chapters", activeChapterId, "payments", paymentId);
-      await updateDoc(pRef, {
-        "Status": "Verification Pending",
-        "Reference": reference
-      });
+      const pSnap = await getDoc(pRef);
+      if (pSnap.exists()) {
+        await updateDoc(pRef, {
+          "Status": "Verification Pending",
+          "Reference": reference
+        });
+        const pData = pSnap.data();
+        await api.logActivity(activeChapterId, pData["Member ID"], "Payment Reference Submitted", `You submitted reference ${reference} for ${pData["Category"] || pData["Description"] || "Dues"}.`);
+      }
       return { success: true };
     } catch (err) {
       console.error("Error submitting payment reference:", err);
@@ -1107,10 +1290,15 @@ export const api = {
     if (!activeChapterId) return { success: false, error: "No active chapter" };
     try {
       const pRef = doc(db, "chapters", activeChapterId, "payments", paymentId);
-      await updateDoc(pRef, {
-        "Status": "Paid",
-        "Paid Date": new Date().toISOString().split('T')[0]
-      });
+      const pSnap = await getDoc(pRef);
+      if (pSnap.exists()) {
+        const pData = pSnap.data();
+        await updateDoc(pRef, {
+          "Status": "Paid",
+          "Paid Date": new Date().toISOString().split('T')[0]
+        });
+        await api.logActivity(activeChapterId, pData["Member ID"], "Payment Verified", `Payment of ₹${pData["Amount"]} for ${pData["Category"] || pData["Description"] || "Dues"} was verified.`);
+      }
       return { success: true };
     } catch (err) {
       console.error("Error verifying payment:", err);
@@ -1133,17 +1321,27 @@ export const api = {
     }
   },
 
-  logActivity: async (chapterId, title, description) => {
-    const auth = getAuth();
-    if (!auth.currentUser) return;
+  updateEventReminder: async (chapterId, eventId, scheduleReminderTime) => {
     try {
-      await addDoc(collection(db, "chapters", chapterId, "activities"), {
-        userId: auth.currentUser.uid,
-        title,
-        description,
-        timestamp: new Date().toISOString()
-      });
-    } catch (e) { console.error("Error logging activity:", e); }
+      if (!chapterId || !eventId) throw new Error("Missing params");
+      const eventRef = doc(db, `chapters/${chapterId}/events`, eventId);
+      await updateDoc(eventRef, { scheduleReminderTime });
+      return { success: true };
+    } catch (error) {
+      console.error("Error updating event reminder:", error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  createRazorpaySubscription: async (planId, chapterId, memberId) => {
+    try {
+      const createSub = httpsCallable(functions, 'createRazorpaySubscription');
+      const result = await createSub({ planId, chapterId, memberId });
+      return { success: true, data: result.data };
+    } catch (error) {
+      console.error("Error creating Razorpay subscription:", error);
+      return { success: false, error: error.message };
+    }
   },
 
   getMyActivities: async (chapterId, userId) => {
@@ -1292,6 +1490,7 @@ export const api = {
       
       await updateDoc(userRef, updateData).catch(e => console.warn("Failed to update users doc:", e));
       await updateDoc(memberRef, updateData);
+      await api.logActivity(chapterId, memberId, "Profile Updated", "User profile information updated.");
       
       return { success: true };
     } catch (error) {
@@ -1448,6 +1647,7 @@ export const api = {
         status: "New",
         timestamp: new Date().toISOString()
       });
+      await api.logActivity(chapterId, memberId, "Submitted Feedback", "You shared feedback with the chapter admins.");
       return { success: true };
     } catch (err) {
       console.error("Error submitting feedback:", err);
@@ -1463,6 +1663,294 @@ export const api = {
       return { success: true };
     } catch (err) {
       console.error("saveFcmToken error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  getClubDetails: async (chapterId) => {
+    try {
+      const snap = await getDoc(doc(db, "chapters", chapterId));
+      if (!snap.exists()) return { success: true, data: {} };
+      const data = snap.data();
+      return { success: true, data: data.clubDetails || {} };
+    } catch (err) {
+      console.error("getClubDetails error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  requestClubDetailsEdit: async (chapterId, newData, currentUser, requiredApprovers) => {
+    try {
+      const editRef = collection(db, "chapters", chapterId, "club_details_edits");
+      await addDoc(editRef, {
+        "Status": "pending",
+        "Proposed By": currentUser["Member ID"],
+        "Proposed By Name": currentUser["Name"],
+        "Timestamp": new Date().toISOString(),
+        "Required Approvers": requiredApprovers,
+        "Approvals": [],
+        "Data": newData
+      });
+      return { success: true };
+    } catch (err) {
+      console.error("requestClubDetailsEdit error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  approveClubDetailsEdit: async (chapterId, editId, currentUser) => {
+    try {
+      const editRef = doc(db, "chapters", chapterId, "club_details_edits", editId);
+      const snap = await getDoc(editRef);
+      if (!snap.exists()) return { success: false, error: "Request not found" };
+      
+      const editData = snap.data();
+      let approvals = editData["Approvals"] || [];
+      if (!approvals.includes(currentUser["Member ID"])) {
+        approvals.push(currentUser["Member ID"]);
+      }
+      
+      const required = editData["Required Approvers"] || [];
+      const isApproved = approvals.length >= (required.length || 1);
+      
+      if (isApproved) {
+        await updateDoc(editRef, { "Status": "approved", "Approvals": approvals });
+        const chapterRef = doc(db, "chapters", chapterId);
+        await updateDoc(chapterRef, { clubDetails: editData["Data"] });
+      } else {
+        await updateDoc(editRef, { "Approvals": approvals });
+      }
+      return { success: true, isApproved };
+    } catch (err) {
+      console.error("approveClubDetailsEdit error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  rejectClubDetailsEdit: async (chapterId, editId) => {
+    try {
+      const editRef = doc(db, "chapters", chapterId, "club_details_edits", editId);
+      await updateDoc(editRef, { "Status": "rejected" });
+      return { success: true };
+    } catch (err) {
+      console.error("rejectClubDetailsEdit error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  getPendingClubDetailsEdits: async (chapterId) => {
+    try {
+      const q = query(collection(db, "chapters", chapterId, "club_details_edits"), where("Status", "==", "pending"));
+      const snap = await getDocs(q);
+      const results = [];
+      snap.forEach(d => results.push({ id: d.id, ...d.data() }));
+      return { success: true, data: results };
+    } catch (err) {
+      console.error("getPendingClubDetailsEdits error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  getApprovedClubDetailsEdits: async (chapterId) => {
+    try {
+      const q = query(collection(db, "chapters", chapterId, "club_details_edits"), where("Status", "==", "approved"));
+      const snap = await getDocs(q);
+      const results = [];
+      snap.forEach(d => results.push({ id: d.id, ...d.data() }));
+      // Sort in memory by Timestamp desc to avoid requiring a composite index
+      results.sort((a, b) => new Date(b.Timestamp || 0) - new Date(a.Timestamp || 0));
+      return { success: true, data: results };
+    } catch (err) {
+      console.error("getApprovedClubDetailsEdits error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Awards Management API
+
+  createAwardCriteria: async (chapterId, criteriaData) => {
+    try {
+      const criteriaRef = collection(db, "chapters", chapterId, "award_criteria");
+      const docRef = await addDoc(criteriaRef, criteriaData);
+      return { success: true, id: docRef.id };
+    } catch (err) {
+      console.error("createAwardCriteria error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  getAwardCriteria: async (chapterId) => {
+    try {
+      const q = query(collection(db, "chapters", chapterId, "award_criteria"));
+      const snap = await getDocs(q);
+      const results = [];
+      snap.forEach(d => results.push({ id: d.id, ...d.data() }));
+      return { success: true, data: results };
+    } catch (err) {
+      console.error("getAwardCriteria error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteAwardCriteria: async (chapterId, criteriaId) => {
+    try {
+      const criteriaRef = doc(db, "chapters", chapterId, "award_criteria", criteriaId);
+      await deleteDoc(criteriaRef);
+      return { success: true };
+    } catch (err) {
+      console.error("deleteAwardCriteria error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  assignBadgesToMembers: async (memberIds, badgeDefinition, awardedBy) => {
+    try {
+      const badgeData = {
+        ...badgeDefinition,
+        awardedBy,
+        date: new Date().toISOString()
+      };
+      
+      const promises = memberIds.map(async (memberId) => {
+        const memberRef = doc(db, "users", String(memberId));
+        const snap = await getDoc(memberRef);
+        if (snap.exists()) {
+          const existingBadges = snap.data().badges || [];
+          // Avoid duplicate badge types if necessary, though here we'll just append
+          if (!existingBadges.some(b => b.id === badgeDefinition.id)) {
+            existingBadges.push(badgeData);
+            await updateDoc(memberRef, { badges: existingBadges });
+          }
+        }
+      });
+      await Promise.all(promises);
+      return { success: true };
+    } catch (err) {
+      console.error("assignBadgesToMembers error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  proposeAward: async (chapterId, criteria, memberIds, badgeDefinition, initiator) => {
+    try {
+      // Find all PST members to create the initial approval state
+      const membersSnap = await getDocs(collection(db, "chapters", chapterId, "members"));
+      const pstRoles = ["President", "Secretary", "Treasurer"];
+      const pstMembers = membersSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(m => pstRoles.includes(m.Role));
+
+      const approvals = {};
+      pstMembers.forEach(m => {
+        // If the PST member is the initiator, they auto-approve
+        if (m.Role === initiator.Role) {
+          approvals[m.Role] = { status: "approved", by: initiator.Name, at: new Date().toISOString() };
+        } else {
+          approvals[m.Role] = { status: "pending", by: m.Name, id: m["Member ID"] || m.id };
+        }
+      });
+
+      const docData = {
+        criteriaId: criteria.id,
+        criteriaName: criteria.name,
+        badgeDefinition,
+        memberIds,
+        initiator: { name: initiator.Name, role: initiator.Role },
+        approvals,
+        status: "pending", // pending, completed, rejected
+        createdAt: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, "chapters", chapterId, "award_approvals"), docData);
+      return { success: true };
+    } catch (err) {
+      console.error("proposeAward error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  getAwardApprovals: async (chapterId) => {
+    try {
+      const snap = await getDocs(collection(db, "chapters", chapterId, "award_approvals"));
+      const approvals = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort by newest first
+      approvals.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      return { success: true, data: approvals };
+    } catch (err) {
+      console.error("getAwardApprovals error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  approveAward: async (chapterId, approvalId, approverRole, approverName) => {
+    try {
+      const ref = doc(db, "chapters", chapterId, "award_approvals", approvalId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) throw new Error("Approval not found");
+      
+      const data = snap.data();
+      const approvals = { ...data.approvals };
+      
+      if (approvals[approverRole]) {
+        approvals[approverRole] = {
+          ...approvals[approverRole],
+          status: "approved",
+          by: approverName,
+          at: new Date().toISOString()
+        };
+      } else {
+        // Fallback if role wasn't mapped initially
+        approvals[approverRole] = { status: "approved", by: approverName, at: new Date().toISOString() };
+      }
+
+      // Check if all PST roles have approved
+      const pstRoles = ["President", "Secretary", "Treasurer"];
+      const allApproved = pstRoles.every(role => {
+        return !approvals[role] || approvals[role].status === "approved";
+      });
+
+      const updates = { approvals };
+      
+      if (allApproved) {
+        updates.status = "completed";
+      }
+      
+      await updateDoc(ref, updates);
+      
+      // If completed, automatically assign the badges!
+      if (allApproved) {
+        await api.assignBadgesToMembers(data.memberIds, data.badgeDefinition, "PST Team");
+      }
+      
+      return { success: true, completed: allApproved };
+    } catch (err) {
+      console.error("approveAward error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  rejectAward: async (chapterId, approvalId, approverRole, approverName) => {
+    try {
+      const ref = doc(db, "chapters", chapterId, "award_approvals", approvalId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) throw new Error("Approval not found");
+
+      const data = snap.data();
+      const approvals = { ...data.approvals };
+
+      if (approvals[approverRole]) {
+        approvals[approverRole] = {
+          ...approvals[approverRole],
+          status: "rejected",
+          by: approverName,
+          at: new Date().toISOString()
+        };
+      }
+
+      await updateDoc(ref, { approvals, status: "rejected" });
+      return { success: true };
+    } catch (err) {
+      console.error("rejectAward error:", err);
       return { success: false, error: err.message };
     }
   }

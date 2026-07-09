@@ -10,7 +10,8 @@ export const Modal = ({
   children, 
   footer,
   maxWidth = '500px',
-  hideCloseButton = false
+  hideCloseButton = false,
+  zIndex = 9999
 }) => {
   // Prevent background scrolling when modal is open
   useEffect(() => {
@@ -28,7 +29,7 @@ export const Modal = ({
     <div 
       className="modal-overlay"
       style={{ 
-        zIndex: 9999, 
+        zIndex: zIndex, 
         display: 'flex', 
         flexDirection: 'column', 
         backgroundColor: 'rgba(0,0,0,0.6)', 
