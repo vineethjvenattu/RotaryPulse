@@ -84,7 +84,10 @@ export function ClubDetails() {
       let pstMembers = [];
       if (membersRes.success) {
         pstMembers = membersRes.members
-          .filter(m => COMMITTEE_ROLES.includes(m["Role"]) && m["Member ID"] !== currentUser["Member ID"])
+          .filter(m => {
+            const mRole = m["Role"] ? String(m["Role"]).trim().toLowerCase() : "";
+            return ['president', 'secretary', 'treasurer'].includes(mRole) && m["Member ID"] !== currentUser["Member ID"];
+          })
           .map(m => m["Member ID"]);
       }
 

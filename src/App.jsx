@@ -180,7 +180,17 @@ function AppContent() {
     opinions: []
   });
   const [loading, setLoading] = useState(true);
+  const [globalViewMemberId, setGlobalViewMemberId] = useState(null);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const handleViewMember = (e) => {
+      setGlobalViewMemberId(e.detail);
+      setActiveTab('members');
+    };
+    window.addEventListener('viewMember', handleViewMember);
+    return () => window.removeEventListener('viewMember', handleViewMember);
+  }, []);
 
   // Enforce landing screen staying minimum 5 seconds
   const [splashTimeoutFinished, setSplashTimeoutFinished] = useState(() => {
@@ -355,7 +365,7 @@ function AppContent() {
         return <Subscription />;
       case 'members':
         if (currentUser.subscriptionStatus !== 'Active') return <Subscription />;
-        return <Members data={data} loading={loading} refreshData={refreshData} />;
+        return <Members data={data} loading={loading} refreshData={refreshData} viewMemberId={globalViewMemberId} clearViewMemberId={() => setGlobalViewMemberId(null)} />;
       case 'events':
         return <Events data={data} loading={loading} refreshData={refreshData} />;
       case 'attendance':

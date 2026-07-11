@@ -6,9 +6,10 @@ import { api } from '../services/api';
 import Papa from 'papaparse';
 import { Avatar } from '../components/Avatar';
 import { Modal } from '../components/Modal';
+import confetti from 'canvas-confetti';
 import './pages.css';
 
-export const Members = ({ data, loading, refreshData }) => {
+export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMemberId }) => {
   const { isPresident, currentUser, role } = useAuth();
   const [chapterSettings, setChapterSettings] = useState(null);
   const [globalRoles, setGlobalRoles] = useState([]);
@@ -19,6 +20,10 @@ export const Members = ({ data, loading, refreshData }) => {
   const [selectedMember, setSelectedMember] = useState(null);
   
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [editProfileForm, setEditProfileForm] = useState({ Mobile: "", Email: "", "Blood Group": "", Birthday: "", Anniversary: "", CompanyName: "", Industry: "", BusinessDesignation: "" });
+  const [savingProfile, setSavingProfile] = useState(false);
+
   const [editRole, setEditRole] = useState('');
   const [deletionNotes, setDeletionNotes] = useState('');
   const [pendingPayments, setPendingPayments] = useState([]);
@@ -35,6 +40,16 @@ export const Members = ({ data, loading, refreshData }) => {
   const [endorseSuccess, setEndorseSuccess] = useState('');
 
   React.useEffect(() => {
+    if (viewMemberId && data?.members) {
+      const member = data.members.find(m => m["Member ID"] === viewMemberId);
+      if (member) {
+        setSelectedMember(member);
+      }
+      if (clearViewMemberId) clearViewMemberId();
+    }
+  }, [viewMemberId, data?.members, clearViewMemberId]);
+
+  React.useEffect(() => {
     if (currentUser?.chapterId) {
       api.getChapterData(currentUser.chapterId).then(res => {
         if (res.success) setChapterSettings(res.data);
@@ -45,10 +60,6 @@ export const Members = ({ data, loading, refreshData }) => {
     });
   }, [currentUser]);
 
-  if (loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>Loading Members...</div>;
-  }
-
   const handleRoleChange = async () => {
     if (!editRole) return;
     const result = await api.changeMemberRole((selectedMember["Member ID"] || selectedMember.id), editRole);
@@ -58,6 +69,31 @@ export const Members = ({ data, loading, refreshData }) => {
       setShowEditModal(false);
     } else {
       alert("Error updating role: " + result.error);
+    }
+  };
+
+  const handleRequestProfileEdit = async () => {
+    if (!selectedMember) return;
+    setSavingProfile(true);
+    let requiredApprovers = ["president", "secretary", "treasurer"];
+    const userRole = currentUser?.Role ? String(currentUser.Role).trim().toLowerCase() : "";
+    if (requiredApprovers.includes(userRole)) {
+      requiredApprovers = requiredApprovers.filter(r => r !== userRole);
+    }
+    const result = await api.requestProfileEdit(
+      currentUser.chapterId, 
+      selectedMember["Member ID"] || selectedMember.id, 
+      selectedMember.Name, 
+      editProfileForm, 
+      currentUser, 
+      requiredApprovers
+    );
+    setSavingProfile(false);
+    if (result.success) {
+      alert("Profile edit proposed successfully! It will be applied once other PST members approve.");
+      setShowEditProfileModal(false);
+    } else {
+      alert("Error proposing profile edit: " + result.error);
     }
   };
 
@@ -83,9 +119,41 @@ export const Members = ({ data, loading, refreshData }) => {
     }
   };
 
-  const systemFields = ['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations', 'badges', 'endorsements'];
+  const systemFields = ['id', 'chapterId', 'Pin', 'status', 'SearchName', 'Name', 'Role', 'Mobile', 'Member ID', 'Rotary ID', 'hasPin', 'FamilyMembers', 'Designations', 'badges', 'endorsements', 'usedCriteria'];
   
   const standardFieldOrder = ["Gender", "Birthday", "Blood Group", "Spouse Name", "Email", "Address", "Profession", "Classification"];
+  
+  const isBirthdayToday = (dateStr) => {
+    if (!dateStr) return false;
+    const parts = String(dateStr).toLowerCase().trim().split(/[\s-]+/);
+    if (parts.length >= 2) {
+      const today = new Date();
+      const currentMonthLong = today.toLocaleString('default', { month: 'long' }).toLowerCase();
+      const currentMonthShort = today.toLocaleString('default', { month: 'short' }).toLowerCase();
+      const currentDay = today.getDate();
+      
+      let day = -1;
+      let month = '';
+      if (parts[0].length === 4 && parts.length >= 3) {
+        const mNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const mIdx = parseInt(parts[1], 10) - 1;
+        month = mNames[mIdx];
+        day = parseInt(parts[2], 10);
+        if (parts[2].includes('T')) day = parseInt(parts[2].split('T')[0], 10);
+      } else {
+        day = parseInt(parts[0], 10);
+        month = parts[1];
+      }
+      return day === currentDay && (month === currentMonthLong || month === currentMonthShort);
+    }
+    return false;
+  };
+
+  React.useEffect(() => {
+    if (selectedMember && selectedMember["Birthday"] && isBirthdayToday(selectedMember["Birthday"])) {
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, zIndex: 10000 });
+    }
+  }, [selectedMember]);
   
   const sortFields = (a, b) => {
     const idxA = standardFieldOrder.indexOf(a);
@@ -175,10 +243,14 @@ export const Members = ({ data, loading, refreshData }) => {
     filteredMembers.sort((a, b) => {
       const aBadges = a.badges ? a.badges.length : 0;
       const bBadges = b.badges ? b.badges.length : 0;
-      return bBadges - aBadges || a["Name"].localeCompare(b["Name"]);
+      return bBadges - aBadges || (a["Name"]||'').localeCompare(b["Name"]||'');
     });
   } else {
-    filteredMembers.sort((a, b) => a["Name"].localeCompare(b["Name"]));
+    filteredMembers.sort((a, b) => (a["Name"]||'').localeCompare(b["Name"]||''));
+  }
+
+  if (loading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>Loading Members...</div>;
   }
 
   return (
@@ -351,6 +423,23 @@ export const Members = ({ data, loading, refreshData }) => {
               </button>
               <div className="drawer-header-actions">
                 {isPresident && (
+                  <>
+                  <button className="drawer-edit-btn" style={{ marginRight: "8px", background: "var(--rotary-blue)" }} onClick={() => { 
+                    setEditProfileForm({
+                      Mobile: selectedMember.Mobile || "",
+                      Email: selectedMember.Email || "",
+                      "Blood Group": selectedMember["Blood Group"] || "",
+                      Birthday: selectedMember.Birthday || "",
+                      Anniversary: selectedMember.Anniversary || "",
+                      CompanyName: selectedMember.CompanyName || "",
+                      Industry: selectedMember.Industry || "",
+                      BusinessDesignation: selectedMember.BusinessDesignation || ""
+                    });
+                    setShowEditProfileModal(true);
+                  }} title="Edit Profile">
+                    <Edit2 size={16} color="white" />
+                  </button>
+
                   <button className="drawer-edit-btn" onClick={async () => { 
                     setEditRole(selectedMember["Role"]); 
                     setShowEditModal(true); 
@@ -365,14 +454,20 @@ export const Members = ({ data, loading, refreshData }) => {
                       if (res.pending && res.pending.length > 0) setDuesAction('cleared');
                     }
                     setFetchingPayments(false);
-                  }} title="Edit Member Profile">
-                    <Edit2 size={16} color="white" />
+                  }} title="Settings">
+                    <Settings size={20} color="white" />
                   </button>
+                  </>
                 )}
               </div>
             </div>
             
             <div className="member-detail-header">
+              {isBirthdayToday(selectedMember["Birthday"]) && (
+                <div style={{ width: '100%', background: 'linear-gradient(135deg, #FFD700, #FFA500)', color: '#fff', padding: '12px', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', borderRadius: '8px' }}>
+                  🎉 Happy Birthday, {selectedMember["Name"].split(' ')[0]}! 🎂
+                </div>
+              )}
               <div className="member-detail-avatar-wrapper">
                 <Avatar member={selectedMember} size={100} className="member-detail-avatar" />
               </div>
@@ -431,13 +526,27 @@ export const Members = ({ data, loading, refreshData }) => {
               
               {selectedMember.FamilyMembers?.some(fm => fm.status === 'approved') && (
                 <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
-                  <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>Approved Relations</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>Family members</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                     {selectedMember.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-                        <div>
-                          <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{fm.name}</div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{fm.relation}</div>
+                      <div 
+                        key={idx} 
+                        style={{ 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          alignItems: 'center', 
+                          background: '#ffffff', 
+                          border: '1px solid var(--border-color)', 
+                          padding: '12px', 
+                          borderRadius: '8px', 
+                          width: '80px', 
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Avatar member={members?.find(m => m["Member ID"] === fm.id) || { Name: fm.name }} size={48} />
+                        <div style={{ marginTop: '8px', width: '100%' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.2' }}>{typeof fm.name === 'object' ? fm.name?.name || JSON.stringify(fm.name) : fm.name}</div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>{fm.relation}</div>
                         </div>
                       </div>
                     ))}
@@ -447,6 +556,11 @@ export const Members = ({ data, loading, refreshData }) => {
 
               {/* Peer Badges & Endorsements */}
               <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                {isBirthdayToday(selectedMember["Birthday"]) && (
+                    <div style={{ background: 'linear-gradient(135deg, #FFD700, #FFA500)', color: '#fff', padding: '12px', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', margin: '-24px -24px 20px -24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                      🎉 Happy Birthday, {selectedMember["Name"].split(' ')[0]}! 🎂
+                    </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>Badges & Endorsements</h4>
                   {selectedMember["Member ID"] !== currentUser["Member ID"] && (
@@ -518,18 +632,18 @@ export const Members = ({ data, loading, refreshData }) => {
                               <img 
                                 src={badge.image} 
                                 alt={badge.name} 
-                                style={{ width: '40px', height: '40px', marginBottom: '8px', objectFit: 'contain' }} 
+                                style={{ width: '56px', height: '56px', marginBottom: '8px', objectFit: 'contain' }} 
                               />
                             ) : (
                               <div style={{
-                                width: '40px', height: '40px', borderRadius: '50%', background: 'var(--rotary-gold)', 
+                                width: '56px', height: '56px', borderRadius: '50%', background: 'var(--rotary-gold)', 
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '8px'
                               }}>
-                                <Award size={20} />
+                                <Award size={28} />
                               </div>
                             )}
                             <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.2' }}>
-                              {badge.name}
+                              {typeof badge.name === 'object' ? badge.name?.name || JSON.stringify(badge.name) : badge.name}
                             </div>
                           </div>
                         ))}

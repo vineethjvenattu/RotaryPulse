@@ -1498,6 +1498,80 @@ export const api = {
     }
   },
 
+  requestProfileEdit: async (chapterId, targetMemberId, targetMemberName, newData, currentUser, requiredApprovers) => {
+    try {
+      const editRef = collection(db, "chapters", chapterId, "profile_edits");
+      await addDoc(editRef, {
+        "Status": "pending",
+        "Target Member ID": targetMemberId,
+        "Target Member Name": targetMemberName,
+        "Proposed By": currentUser["Member ID"],
+        "Proposed By Name": currentUser["Name"],
+        "Timestamp": new Date().toISOString(),
+        "Required Approvers": requiredApprovers,
+        "Approvals": [],
+        "Data": newData
+      });
+      return { success: true };
+    } catch (err) {
+      console.error("requestProfileEdit error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  getPendingProfileEdits: async (chapterId) => {
+    try {
+      const q = query(collection(db, "chapters", chapterId, "profile_edits"), where("Status", "==", "pending"));
+      const snap = await getDocs(q);
+      const results = [];
+      snap.forEach(d => results.push({ id: d.id, ...d.data() }));
+      return { success: true, data: results };
+    } catch (err) {
+      console.error("getPendingProfileEdits error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  approveProfileEdit: async (chapterId, editId, currentUser) => {
+    try {
+      const editRef = doc(db, "chapters", chapterId, "profile_edits", editId);
+      const snap = await getDoc(editRef);
+      if (!snap.exists()) return { success: false, error: "Request not found" };
+      
+      const data = snap.data();
+      const approvals = data["Approvals"] || [];
+      if (!approvals.includes(currentUser["Member ID"])) {
+        approvals.push(currentUser["Member ID"]);
+      }
+      
+      const required = data["Required Approvers"] || [];
+      const isApproved = required.every(r => approvals.includes(r));
+      
+      if (isApproved) {
+        // Apply the profile changes
+        await api.updateUserProfile(chapterId, data["Target Member ID"], data["Data"]);
+        await updateDoc(editRef, { "Status": "approved", "Approvals": approvals });
+      } else {
+        await updateDoc(editRef, { "Approvals": approvals });
+      }
+      return { success: true, isApproved };
+    } catch (err) {
+      console.error("approveProfileEdit error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
+  rejectProfileEdit: async (chapterId, editId) => {
+    try {
+      const editRef = doc(db, "chapters", chapterId, "profile_edits", editId);
+      await updateDoc(editRef, { "Status": "rejected" });
+      return { success: true };
+    } catch (err) {
+      console.error("rejectProfileEdit error:", err);
+      return { success: false, error: err.message };
+    }
+  },
+
   uploadProfilePicture: async (memberId, file) => {
     try {
       if (!storage) throw new Error("Firebase Storage is not configured");
@@ -1803,7 +1877,7 @@ export const api = {
     }
   },
 
-  assignBadgesToMembers: async (memberIds, badgeDefinition, awardedBy) => {
+  assignBadgesToMembers: async (chapterId, memberIds, badgeDefinition, awardedBy) => {
     try {
       const badgeData = {
         ...badgeDefinition,
@@ -1812,14 +1886,25 @@ export const api = {
       };
       
       const promises = memberIds.map(async (memberId) => {
-        const memberRef = doc(db, "users", String(memberId));
-        const snap = await getDoc(memberRef);
+        // We should update the member document in the chapter's members collection
+        const chapterMemberRef = doc(db, "chapters", chapterId, "members", String(memberId));
+        const snap = await getDoc(chapterMemberRef);
         if (snap.exists()) {
           const existingBadges = snap.data().badges || [];
-          // Avoid duplicate badge types if necessary, though here we'll just append
           if (!existingBadges.some(b => b.id === badgeDefinition.id)) {
             existingBadges.push(badgeData);
-            await updateDoc(memberRef, { badges: existingBadges });
+            await updateDoc(chapterMemberRef, { badges: existingBadges });
+          }
+        }
+        
+        // Also update the global users collection just in case
+        const userRef = doc(db, "users", String(memberId));
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const existingBadges = userSnap.data().badges || [];
+          if (!existingBadges.some(b => b.id === badgeDefinition.id)) {
+            existingBadges.push(badgeData);
+            await updateDoc(userRef, { badges: existingBadges });
           }
         }
       });
@@ -1831,7 +1916,7 @@ export const api = {
     }
   },
 
-  proposeAward: async (chapterId, criteria, memberIds, badgeDefinition, initiator) => {
+  proposeAward: async (chapterId, criteria, memberIds, badgeDefinition, initiator, memberDeductions) => {
     try {
       // Find all PST members to create the initial approval state
       const membersSnap = await getDocs(collection(db, "chapters", chapterId, "members"));
@@ -1853,6 +1938,8 @@ export const api = {
       const docData = {
         criteriaId: criteria.id,
         criteriaName: criteria.name,
+        criteria, // Save full criteria for deduction at approval
+        memberDeductions, // Pre-calculated deductions
         badgeDefinition,
         memberIds,
         initiator: { name: initiator.Name, role: initiator.Role },
@@ -1919,7 +2006,33 @@ export const api = {
       
       // If completed, automatically assign the badges!
       if (allApproved) {
-        await api.assignBadgesToMembers(data.memberIds, data.badgeDefinition, "PST Team");
+        await api.assignBadgesToMembers(chapterId, data.memberIds, data.badgeDefinition, "PST Team");
+        
+        // Deduct used criteria from members
+        if (data.memberDeductions) {
+          const membersSnap = await getDocs(collection(db, "chapters", chapterId, "members"));
+          for (let docSnap of membersSnap.docs) {
+            const memData = docSnap.data();
+            const mId = memData["Member ID"] || memData.id || docSnap.id;
+            
+            if (data.memberIds.includes(mId) && data.memberDeductions[mId]) {
+              const deductions = data.memberDeductions[mId];
+              const usedCriteria = { ...(memData.usedCriteria || {}) };
+              
+              let updated = false;
+              for (const [metric, amount] of Object.entries(deductions)) {
+                if (amount > 0) {
+                  usedCriteria[metric] = (usedCriteria[metric] || 0) + amount;
+                  updated = true;
+                }
+              }
+              
+              if (updated) {
+                await updateDoc(docSnap.ref, { usedCriteria });
+              }
+            }
+          }
+        }
       }
       
       return { success: true, completed: allApproved };

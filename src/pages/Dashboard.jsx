@@ -23,8 +23,10 @@ import {
   Beer,
   Heart,
   X,
-  ThumbsUp
+  ThumbsUp,
+  Target
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import './pages.css';
 
 export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
@@ -33,8 +35,12 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const [projectionTab, setProjectionTab] = useState('finance');
   
   const [pendingMembers, setPendingMembers] = useState([]);
+  const [pendingClubDetails, setPendingClubDetails] = useState([]);
+  const [pendingProfileEdits, setPendingProfileEdits] = useState([]);
+
   const [loadingPending, setLoadingPending] = useState(false);
   const [deletionRequests, setDeletionRequests] = useState([]);
+  const [awardApprovals, setAwardApprovals] = useState([]);
   const [deletionConsents, setDeletionConsents] = useState({});
   const [pendingRelations, setPendingRelations] = useState([]);
   const [whatsNew, setWhatsNew] = useState([]);
@@ -51,12 +57,13 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       setWhatsNew(notifications);
     });
     
-    if (isPresident || isSecretary || currentUser?.isSuperAdmin) {
+    if (isPST || currentUser?.isSuperAdmin) {
       loadPending();
       loadPendingRelations();
     }
-    if (["President", "Secretary", "Treasurer"].includes(currentUser?.["Role"]) || currentUser?.isSuperAdmin) {
+    if (isPST || currentUser?.isSuperAdmin) {
       loadDeletionRequests();
+      loadAwardApprovals();
     }
     
     return () => {
@@ -103,10 +110,14 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
 
   const loadPending = async () => {
     setLoadingPending(true);
-    const result = await api.getPendingMembers();
-    if (result.success) {
-      setPendingMembers(result.pending);
-    }
+    const [memRes, clubRes, profRes] = await Promise.all([
+      api.getPendingMembers(),
+      api.getPendingClubDetailsEdits(currentUser?.chapterId),
+      api.getPendingProfileEdits(currentUser?.chapterId)
+    ]);
+    if (memRes.success) setPendingMembers(memRes.pending);
+    if (clubRes.success) setPendingClubDetails(clubRes.data);
+    if (profRes.success) setPendingProfileEdits(profRes.data);
     setLoadingPending(false);
   };
 
@@ -115,6 +126,14 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     const result = await api.getDeletionRequests(currentUser.chapterId);
     if (result.success) {
       setDeletionRequests(result.requests);
+    }
+  };
+
+  const loadAwardApprovals = async () => {
+    if (!currentUser?.chapterId) return;
+    const result = await api.getAwardApprovals(currentUser.chapterId);
+    if (result.success) {
+      setAwardApprovals(result.data);
     }
   };
 
@@ -163,6 +182,48 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     refreshData(true);
   };
 
+  const handleClubDetailsApprove = async (editId) => {
+    if (!window.confirm("Approve this Club Details change?")) return;
+    const result = await api.approveClubDetailsEdit(currentUser.chapterId, editId, currentUser);
+    if (result.success) {
+      alert(result.isApproved ? "Change approved and applied!" : "Approval recorded, waiting for others.");
+      loadPending();
+    } else {
+      alert("Error: " + result.error);
+    }
+  };
+  const handleClubDetailsReject = async (editId) => {
+    if (!window.confirm("Reject this Club Details change?")) return;
+    const result = await api.rejectClubDetailsEdit(currentUser.chapterId, editId, currentUser);
+    if (result.success) {
+      alert("Change rejected.");
+      loadPending();
+    } else {
+      alert("Error: " + result.error);
+    }
+  };
+  const handleProfileEditApprove = async (editId) => {
+    if (!window.confirm("Approve this profile edit?")) return;
+    const result = await api.approveProfileEdit(currentUser.chapterId, editId, currentUser);
+    if (result.success) {
+      alert(result.isApproved ? "Profile edit approved and applied!" : "Approval recorded, waiting for others.");
+      loadPending();
+      refreshData(true);
+    } else {
+      alert("Error: " + result.error);
+    }
+  };
+  const handleProfileEditReject = async (editId) => {
+    if (!window.confirm("Reject this profile edit?")) return;
+    const result = await api.rejectProfileEdit(currentUser.chapterId, editId, currentUser);
+    if (result.success) {
+      alert("Profile edit rejected.");
+      loadPending();
+    } else {
+      alert("Error: " + result.error);
+    }
+  };
+
   const handleRejectRelation = async (memberId, relationIndex) => {
     if (window.confirm("Are you sure you want to reject this family relation?")) {
       await api.rejectRelation(currentUser.chapterId, memberId, relationIndex);
@@ -179,10 +240,6 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   const [savingOpinion, setSavingOpinion] = useState(false);
   const [opinionError, setOpinionError] = useState('');
 
-  if (loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>Loading Dashboard...</div>;
-  }
-
   const { 
     members = [], 
     events = [], 
@@ -193,7 +250,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     payments = [],
     feedbacks = [],
     paymentEdits = []
-  } = data;
+  } = data || {};
 
   // 1. Find Next Meeting / Event
   const todayStr = new Date().toISOString().split('T')[0];
@@ -247,7 +304,82 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       "isAssignee": String(o["Action Assignee"]).trim() === currentUserId
     }));
   
-  myTasks = [...myTasks, ...myOpinionActions];
+  const myAwardApprovals = awardApprovals.filter(a => {
+    if (a.status !== "pending") return false;
+    const approval = a.approvals?.[currentUser.Role];
+    return approval && approval.status === "pending";
+  }).map(a => ({
+    "Task ID": a.id,
+    "Title": `Award Approval: ${typeof a.criteriaName === 'object' ? a.criteriaName?.name || JSON.stringify(a.criteriaName) : a.criteriaName}`,
+    "Target Date": new Date(a.createdAt).toLocaleDateString(),
+    "Status": "Pending",
+    "isAwardApproval": true
+  }));
+
+  let memberApprovals = [];
+  let deletionApprovals = [];
+  let relationApprovals = [];
+  
+  if (isPST) {
+    memberApprovals = pendingMembers.map(m => ({
+      "Task ID": `member_approval_${m.id}`,
+      "Title": `Registration Approval: ${m.Name}`,
+      "Target Date": m.createdAt ? new Date(m.createdAt).toLocaleDateString() : "Pending",
+      "Status": "Pending",
+      "isMemberApproval": true,
+      "memberId": m.id
+    }));
+
+    deletionApprovals = deletionRequests.filter(r => {
+      const consent = r.consents?.[currentUser.Role];
+      return !consent || consent.status === 'pending';
+    }).map(r => ({
+      "Task ID": `deletion_approval_${r.id}`,
+      "Title": `Member Deletion Approval: ${r.memberName}`,
+      "Target Date": new Date(r.requestedAt).toLocaleDateString(),
+      "Status": "Pending",
+      "isDeletionApproval": true,
+      "requestId": r.id
+    }));
+
+    const clubDetailsApprovals = pendingClubDetails.filter(c => {
+      const approvals = c.Approvals || [];
+      return !approvals.includes(currentUserId);
+    }).map(c => ({
+      "Task ID": `club_details_${c.id}`,
+      "Title": `Club Details Change Approval (by ${c["Proposed By Name"]})`,
+      "Target Date": c.Timestamp ? new Date(c.Timestamp).toLocaleDateString() : "Pending",
+      "Status": "Pending",
+      "isClubDetailsApproval": true,
+      "editId": c.id,
+      "originalEdit": c
+    }));
+
+    const profileEditApprovals = pendingProfileEdits.filter(p => {
+      const approvals = p.Approvals || [];
+      return !approvals.includes(currentUserId);
+    }).map(p => ({
+      "Task ID": `profile_edit_${p.id}`,
+      "Title": `Profile Edit Approval: ${p["Target Member Name"]} (by ${p["Proposed By Name"]})`,
+      "Target Date": p.Timestamp ? new Date(p.Timestamp).toLocaleDateString() : "Pending",
+      "Status": "Pending",
+      "isProfileEditApproval": true,
+      "editId": p.id,
+      "originalEdit": p
+    }));
+
+    relationApprovals = pendingRelations.map(rel => ({
+      "Task ID": `relation_approval_${rel.memberId}_${rel.relationIndex}`,
+      "Title": `Family Relation Approval: ${rel.relation?.Name} (for ${rel.memberName})`,
+      "Target Date": "Pending",
+      "Status": "Pending",
+      "isRelationApproval": true,
+      "memberId": rel.memberId,
+      "relationIndex": rel.relationIndex
+    }));
+  }
+
+  myTasks = [...myTasks, ...myOpinionActions, ...myAwardApprovals, ...memberApprovals, ...deletionApprovals, ...relationApprovals, ...(isPST ? pendingClubDetails.filter(c => !(c.Approvals || []).includes(currentUserId)).map(c => ({ "Task ID": `club_details_${c.id}`, "Title": `Club Details Change (by ${c["Proposed By Name"]})`, "Status": "Pending", "isClubDetailsApproval": true, "editId": c.id, "originalEdit": c })) : []), ...(isPST ? pendingProfileEdits.filter(p => !(p.Approvals || []).includes(currentUserId)).map(p => ({ "Task ID": `profile_edit_${p.id}`, "Title": `Profile Edit: ${p["Target Member Name"]} (by ${p["Proposed By Name"]})`, "Status": "Pending", "isProfileEditApproval": true, "editId": p.id, "originalEdit": p })) : [])];
 
   // 3. Meeting Projection Data
   const currentMeetingId = nextEvent?.["Event ID"] || "";
@@ -480,7 +612,26 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   };
 
   const celebratingToday = allCelebrations.filter(c => c.day === currentDay && isThisMonth(c)).sort((a, b) => a.day - b.day);
-  const celebratingThisMonth = celebratingToday.length > 0 ? celebratingToday : allCelebrations.filter(c => isThisMonth(c)).sort((a, b) => a.day - b.day).slice(0, 5);
+  const celebratingThisMonth = celebratingToday.length > 0 ? celebratingToday : allCelebrations.filter(c => isThisMonth(c) && c.day >= currentDay).sort((a, b) => a.day - b.day).slice(0, 5);
+
+  React.useEffect(() => {
+    if (celebratingToday && celebratingToday.length > 0) {
+      const duration = 5 * 1000;
+      const animationEnd = Date.now() + duration;
+      const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 2000 };
+      const randomInRange = (min, max) => Math.random() * (max - min) + min;
+
+      const interval = setInterval(() => {
+        const timeLeft = animationEnd - Date.now();
+        if (timeLeft <= 0) return clearInterval(interval);
+        const particleCount = 50 * (timeLeft / duration);
+        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+      }, 250);
+      
+      return () => clearInterval(interval);
+    }
+  }, [celebratingToday.length]);
 
   const handleToggleTask = async (taskId, currentStatus) => {
     try {
@@ -556,6 +707,10 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     return 'Good Evening,';
   };
   const greeting = getGreeting();
+
+  if (loading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>Loading Dashboard...</div>;
+  }
 
   return (
     <div className="content-area animate-fade-in">
@@ -710,7 +865,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
           )}
 
           {/* Deletion Requests (Core Members Only) */}
-          {["President", "Secretary", "Treasurer"].includes(currentUser?.["Role"]) && deletionRequests.length > 0 && (
+          {isPST && deletionRequests.length > 0 && (
             <div className="card" style={{ marginBottom: '20px', borderLeft: '4px solid #f97316' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <Users size={20} color="#f97316" />
@@ -799,7 +954,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                 <span className="meeting-header-tag" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--rotary-blue-dark)', margin: 0 }}>
                   {getDaysRemaining(nextEvent["Date"])}
                 </span>
-                {currentUser && ["President", "Secretary", "Treasurer"].includes(currentUser["Role"]) && (
+                {currentUser && isPST && (
                   <button 
                     onClick={() => setActiveTab('meeting-console')}
                     className="btn btn-secondary"
@@ -1162,7 +1317,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
           )}
 
           {/* Admin Club UPI QR Code */}
-          {["President", "Secretary", "Treasurer"].includes(currentUser?.["Role"]) && (
+          {isPST && (
             <div className="card" style={{ marginBottom: '20px', borderLeft: '4px solid var(--success)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <DollarSign size={20} color="var(--success)" />
@@ -1303,10 +1458,42 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                           {task.originalMeetingDate && ` (Meeting: ${task.originalMeetingDate})`}
                         </div>
                         <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
-                          {task.isApproval ? (
+                          {task.isAwardApproval ? (
+                            <button onClick={() => setActiveTab('awards')} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--rotary-gold)', color: '#000' }}>
+                              Go to Awards
+                            </button>
+                          ) : task.isApproval ? (
                             <button onClick={() => setActiveTab('payments')} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--rotary-blue)' }}>
                               Go to Payments
                             </button>
+                          ) : task.isMemberApproval ? (
+                            <>
+                              <button onClick={() => handleApprove(task.memberId)} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>Approve</button>
+                              <button onClick={() => handleReject(task.memberId)} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--error)', borderColor: 'var(--error)' }}>Reject</button>
+                            </>
+                          ) : task.isClubDetailsApproval ? (
+                            <>
+                              <button onClick={() => handleClubDetailsApprove(task.editId)} className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "11px", background: "var(--success)" }}>Approve</button>
+                              <button onClick={() => handleClubDetailsReject(task.editId)} className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: "11px", color: "var(--error)", borderColor: "var(--error)" }}>Reject</button>
+                              <button onClick={() => { alert(JSON.stringify(task.originalEdit.Data, null, 2)); }} className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }}>View Changes</button>
+                            </>
+                          ) : task.isProfileEditApproval ? (
+                            <>
+                              <button onClick={() => handleProfileEditApprove(task.editId)} className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "11px", background: "var(--success)" }}>Approve</button>
+                              <button onClick={() => handleProfileEditReject(task.editId)} className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: "11px", color: "var(--error)", borderColor: "var(--error)" }}>Reject</button>
+                              <button onClick={() => { alert(JSON.stringify(task.originalEdit.Data, null, 2)); }} className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }}>View Changes</button>
+                            </>
+
+                          ) : task.isDeletionApproval ? (
+                            <>
+                              <button onClick={() => handleApproveDeletion(task.requestId)} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>Approve</button>
+                              <button onClick={() => handleRejectDeletion(task.requestId)} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--error)', borderColor: 'var(--error)' }}>Reject</button>
+                            </>
+                          ) : task.isRelationApproval ? (
+                            <>
+                              <button onClick={() => handleApproveRelation(task.memberId, task.relationIndex)} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--success)' }}>Approve</button>
+                              <button onClick={() => handleRejectRelation(task.memberId, task.relationIndex)} className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', color: 'var(--error)', borderColor: 'var(--error)' }}>Reject</button>
+                            </>
                           ) : task.isOpinionAction ? (
                             <>
                               {(!task["Status"] || task["Status"] === 'Pending') && task.isAssignee && (
@@ -1398,10 +1585,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
                 {celebratingThisMonth.map((celebration, idx) => (
                   <div key={idx} className="ticker-item">
                     <Avatar 
-                      member={{ 
-                        Name: celebration.whatsappName, 
-                        Image: celebration.isFamilyMember ? null : celebration.member.Image 
-                      }} 
+                      member={celebration.isFamilyMember ? { Name: celebration.whatsappName } : { ...celebration.member, Name: celebration.whatsappName }} 
                       size={56} 
                       className="ticker-avatar" 
                     />

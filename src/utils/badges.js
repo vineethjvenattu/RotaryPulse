@@ -88,7 +88,9 @@ export const calculateMemberBadges = (memberId, payments, attendance, feedbacks,
   return earnedBadges.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 };
 
-export const evaluateCriteria = (memberId, criteria, payments, attendance) => {
+export const evaluateCriteria = (member, criteria, payments, attendance) => {
+  const memberId = member["Member ID"] || member.id;
+  const usedCriteria = member.usedCriteria || {};
   // Backwards compatibility for flat rules
   const ruleGroups = criteria.ruleGroups || [
     {
@@ -126,12 +128,15 @@ export const evaluateCriteria = (memberId, criteria, payments, attendance) => {
       actualValue = totalEvents > 0 ? (attended / totalEvents) * 100 : 0;
     }
 
+    const used = usedCriteria[metric] || 0;
+    const remainingValue = actualValue - used;
+
     switch (operator) {
-      case '>=': return actualValue >= threshold;
-      case '>': return actualValue > threshold;
-      case '<=': return actualValue <= threshold;
-      case '<': return actualValue < threshold;
-      case '==': return actualValue === threshold;
+      case '>=': return remainingValue >= threshold;
+      case '>': return remainingValue > threshold;
+      case '<=': return remainingValue <= threshold;
+      case '<': return remainingValue < threshold;
+      case '==': return remainingValue === threshold;
       default: return false;
     }
   };
@@ -141,4 +146,71 @@ export const evaluateCriteria = (memberId, criteria, payments, attendance) => {
     // Evaluate inner AND conditions (ALL conditions in the group must be satisfied)
     return group.conditions.every(cond => evaluateCondition(cond));
   });
+};
+
+export const getCriteriaDeductions = (member, criteria, payments, attendance) => {
+  // Determine the deduction amounts by finding the first rule group the member passed.
+  // We use the same evaluateCriteria logic but we find WHICH group passed.
+  const memberId = member["Member ID"] || member.id;
+  const usedCriteria = member.usedCriteria || {};
+
+  const ruleGroups = criteria.ruleGroups || [
+    {
+      conditions: [
+        {
+          metric: criteria.metric,
+          operator: criteria.operator,
+          value: criteria.value
+        }
+      ]
+    }
+  ];
+
+  const evaluateCondition = (cond) => {
+    const { metric, operator, value } = cond;
+    const threshold = parseFloat(value);
+    let actualValue = 0;
+
+    if (metric === 'donations_amount') {
+      actualValue = payments.reduce((sum, p) => {
+        if (String(p["Member ID"]) === String(memberId) && p["Status"] === 'Paid') {
+          const cat = (p["Category"] || '').toLowerCase();
+          const desc = (p["Description"] || '').toLowerCase();
+          if (cat.includes('donation') || cat.includes('charity') || desc.includes('donation') || desc.includes('charity')) {
+            return sum + parseFloat(p["Amount"] || 0);
+          }
+        }
+        return sum;
+      }, 0);
+    } else if (metric === 'events_attended') {
+      actualValue = attendance.filter(a => String(a["Member ID"]) === String(memberId) && a["Status"] === 'Present').length;
+    } else if (metric === 'attendance_rate') {
+      const totalEvents = new Set(attendance.map(a => a["Event ID"] || a["Date"])).size;
+      const attended = attendance.filter(a => String(a["Member ID"]) === String(memberId) && a["Status"] === 'Present').length;
+      actualValue = totalEvents > 0 ? (attended / totalEvents) * 100 : 0;
+    }
+
+    const used = usedCriteria[metric] || 0;
+    const remainingValue = actualValue - used;
+
+    switch (operator) {
+      case '>=': return remainingValue >= threshold;
+      case '>': return remainingValue > threshold;
+      case '<=': return remainingValue <= threshold;
+      case '<': return remainingValue < threshold;
+      case '==': return remainingValue === threshold;
+      default: return false;
+    }
+  };
+
+  for (let group of ruleGroups) {
+    if (group.conditions.every(cond => evaluateCondition(cond))) {
+      const deductions = {};
+      group.conditions.forEach(cond => {
+        deductions[cond.metric] = (deductions[cond.metric] || 0) + parseFloat(cond.value);
+      });
+      return deductions;
+    }
+  }
+  return {}; // No deduction if they somehow didn't pass or had no rules
 };

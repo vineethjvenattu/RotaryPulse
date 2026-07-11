@@ -89,10 +89,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Helper flags computed from user role
-  const role = currentUser ? currentUser["Role"] : "";
-  const isPresident = role === "President";
-  const isSecretary = role === "Secretary";
-  const isTreasurer = role === "Treasurer";
+  const role = currentUser && currentUser["Role"] ? String(currentUser["Role"]).trim().toLowerCase() : "";
+  const isPresident = role === "president";
+  const isSecretary = role === "secretary";
+  const isTreasurer = role === "treasurer";
   
   const canManageEvents = isPresident || isSecretary;
   const canMarkAttendance = isPresident || isSecretary;

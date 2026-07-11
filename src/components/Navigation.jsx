@@ -153,7 +153,8 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
     if (!currentUser || !data?.paymentEdits) return 0;
     
     // Are we a PST?
-    const isPST = ["President", "Secretary", "Treasurer"].includes(currentUser.Role);
+    const userRole = currentUser.Role ? String(currentUser.Role).trim().toLowerCase() : "";
+    const isPST = ["president", "secretary", "treasurer"].includes(userRole);
     if (!isPST) return 0;
 
     return data.paymentEdits.filter(edit => {
@@ -172,7 +173,8 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
   const myClubDetailsApprovalCount = React.useMemo(() => {
     if (!currentUser || !data?.clubDetailsEdits) return 0;
     
-    const isPST = ["President", "Secretary", "Treasurer"].includes(currentUser.Role);
+    const userRole = currentUser.Role ? String(currentUser.Role).trim().toLowerCase() : "";
+    const isPST = ["president", "secretary", "treasurer"].includes(userRole);
     if (!isPST) return 0;
 
     return data.clubDetailsEdits.filter(edit => {

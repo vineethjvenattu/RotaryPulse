@@ -9,6 +9,7 @@ import { User, Users, Phone, Mail, Award, Calendar, Link, Settings, Database, Lo
 import { Avatar } from '../components/Avatar';
 import { Modal } from '../components/Modal';
 import { getTagColor } from '../utils/tagColors';
+import confetti from 'canvas-confetti';
 import './pages.css';
 
 export const Profile = ({ data, refreshData }) => {
@@ -19,6 +20,37 @@ export const Profile = ({ data, refreshData }) => {
   const [activities, setActivities] = useState([]);
   const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
   
+  const isBirthdayToday = (dateStr) => {
+    if (!dateStr) return false;
+    const parts = String(dateStr).toLowerCase().trim().split(/[\s-]+/);
+    if (parts.length >= 2) {
+      const today = new Date();
+      const currentMonthLong = today.toLocaleString('default', { month: 'long' }).toLowerCase();
+      const currentMonthShort = today.toLocaleString('default', { month: 'short' }).toLowerCase();
+      const currentDay = today.getDate();
+      
+      let day = -1;
+      let month = '';
+      if (parts[0].length === 4 && parts.length >= 3) {
+        const mNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const mIdx = parseInt(parts[1], 10) - 1;
+        month = mNames[mIdx];
+        day = parseInt(parts[2], 10);
+        if (parts[2].includes('T')) day = parseInt(parts[2].split('T')[0], 10);
+      } else {
+        day = parseInt(parts[0], 10);
+        month = parts[1];
+      }
+      return day === currentDay && (month === currentMonthLong || month === currentMonthShort);
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if (currentUser && currentUser["Birthday"] && isBirthdayToday(currentUser["Birthday"])) {
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, zIndex: 10000 });
+    }
+  }, [currentUser]);
 
   const formatDateDisplay = (val) => {
     if (!val) return "";
@@ -60,6 +92,10 @@ export const Profile = ({ data, refreshData }) => {
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
   const [showCropper, setShowCropper] = useState(false);
+  
+  const [pendingAvatarBlob, setPendingAvatarBlob] = useState(null);
+  const [pendingAvatarUrl, setPendingAvatarUrl] = useState(null);
+  const [pendingGeneratedAvatarId, setPendingGeneratedAvatarId] = useState(null);
 
   // Change PIN State
   const [showPinModal, setShowPinModal] = useState(false);
@@ -163,6 +199,26 @@ export const Profile = ({ data, refreshData }) => {
     const targetId = editingMemberId || currentUser["Member ID"];
     const targetChapterId = editingMemberId !== currentUser["Member ID"] ? (allPlatformMembers.find(m => m["Member ID"] === targetId)?.chapterId || currentUser.chapterId) : currentUser.chapterId;
 
+    if (pendingAvatarBlob) {
+      const resImg = await api.uploadProfilePicture(targetId, pendingAvatarBlob);
+      if (resImg.success) {
+        updateData.avatarUrl = resImg.url;
+      } else {
+        alert("Error uploading image: " + resImg.error);
+        setSavingProfile(false);
+        return;
+      }
+    } else if (pendingGeneratedAvatarId) {
+      const claimRes = await api.claimAvatar(pendingGeneratedAvatarId, targetId);
+      if (claimRes.success) {
+        updateData.avatarUrl = pendingAvatarUrl;
+      } else {
+        alert("Error claiming avatar: " + claimRes.error);
+        setSavingProfile(false);
+        return;
+      }
+    }
+
     const res = await api.updateUserProfile(targetChapterId, targetId, updateData);
     
     // Intelligently assign wedding date to spouse
@@ -182,12 +238,18 @@ export const Profile = ({ data, refreshData }) => {
       if (editingMemberId) {
          setShowEditProfile(false);
          setEditingMemberId(null);
+         setPendingAvatarBlob(null);
+         setPendingAvatarUrl(null);
+         setPendingGeneratedAvatarId(null);
          refreshData();
       } else {
         const updatedUser = { ...currentUser, ...updateData };
         sessionStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
         localStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
-        setShowEditProfileModal(false);
+        setShowEditProfile(false);
+        setPendingAvatarBlob(null);
+        setPendingAvatarUrl(null);
+        setPendingGeneratedAvatarId(null);
         window.location.reload();
       }
     } else {
@@ -219,44 +281,24 @@ export const Profile = ({ data, refreshData }) => {
 
   const handleSaveCrop = async () => {
     try {
-      setUploadingImage(true);
       const croppedImageBlob = await getCroppedImg(imageSrc, croppedAreaPixels);
       croppedImageBlob.name = 'profile.jpeg';
       
-      const res = await api.uploadProfilePicture(currentUser["Member ID"], croppedImageBlob);
-      if (res.success) {
-        const updateData = { avatarUrl: res.url };
-        await api.updateUserProfile(currentUser.chapterId, currentUser["Member ID"], updateData);
-        const updatedUser = { ...currentUser, ...updateData };
-        sessionStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
-        localStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
-        setShowCropper(false);
-        window.location.reload();
-      } else {
-        alert("Error uploading image: " + res.error);
-        setUploadingImage(false);
-      }
+      setPendingAvatarBlob(croppedImageBlob);
+      setPendingAvatarUrl(URL.createObjectURL(croppedImageBlob));
+      setPendingGeneratedAvatarId(null);
+      setShowCropper(false);
     } catch (e) {
       console.error(e);
       alert("Error cropping image: " + e.message);
-      setUploadingImage(false);
     }
   };
 
 
   const handleSelectAvatar = async (avatarId, url) => {
-    if (!window.confirm("Set this as your profile picture?")) return;
-    const claimRes = await api.claimAvatar(avatarId, currentUser["Member ID"]);
-    if (claimRes.success) {
-      const updateData = { avatarUrl: url };
-      await api.updateUserProfile(currentUser.chapterId, currentUser["Member ID"], updateData);
-      const updatedUser = { ...currentUser, ...updateData };
-      sessionStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
-      localStorage.setItem("rc_user_session", JSON.stringify(updatedUser));
-      window.location.reload();
-    } else {
-      alert("Error claiming avatar: " + claimRes.error);
-    }
+    setPendingGeneratedAvatarId(avatarId);
+    setPendingAvatarUrl(url);
+    setPendingAvatarBlob(null);
   };
   const searchableMembers = useMemo(() => {
     const list = [];
@@ -422,6 +464,12 @@ export const Profile = ({ data, refreshData }) => {
           <p className="page-subtitle">View your membership details and system configurations</p>
         </div>
       </div>
+
+      {currentUser && currentUser["Birthday"] && isBirthdayToday(currentUser["Birthday"]) && (
+        <div style={{ background: 'linear-gradient(135deg, #FFD700, #FFA500)', color: '#fff', padding: '16px', textAlign: 'center', fontWeight: 'bold', fontSize: '16px', marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', borderRadius: '12px' }}>
+          🎉 Happy Birthday, {currentUser["Name"].split(' ')[0]}! Have a wonderful day! 🎂
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         {/* User Card */}
@@ -737,7 +785,7 @@ export const Profile = ({ data, refreshData }) => {
                               </div>
                             )}
                             <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '14px', marginBottom: '8px', lineHeight: '1.2' }}>
-                              {badge.name}
+                              {typeof badge.name === 'object' ? badge.name?.name || JSON.stringify(badge.name) : badge.name}
                             </div>
                           </>
                         ) : (
@@ -1047,8 +1095,8 @@ export const Profile = ({ data, refreshData }) => {
             />
             <div style={{ display: 'flex', gap: '12px' }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCropper(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveCrop} disabled={uploadingImage}>
-                {uploadingImage ? 'Uploading...' : 'Save & Upload'}
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveCrop}>
+                Confirm Crop
               </button>
             </div>
           </div>
@@ -1111,12 +1159,24 @@ export const Profile = ({ data, refreshData }) => {
       {/* Edit Profile Modal */}
       <Modal
         isOpen={showEditProfile}
-        onClose={() => { setShowEditProfile(false); setEditingMemberId(null); }}
+        onClose={() => { 
+          setShowEditProfile(false); 
+          setEditingMemberId(null); 
+          setPendingAvatarBlob(null);
+          setPendingAvatarUrl(null);
+          setPendingGeneratedAvatarId(null);
+        }}
         title="Edit Profile"
         subtitle="Update your personal details and avatar."
         footer={
           <>
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowEditProfile(false)}>Cancel</button>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
+              setShowEditProfile(false);
+              setEditingMemberId(null);
+              setPendingAvatarBlob(null);
+              setPendingAvatarUrl(null);
+              setPendingGeneratedAvatarId(null);
+            }}>Cancel</button>
             <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveProfile} disabled={savingProfile}>
               {savingProfile ? 'Saving...' : 'Save Profile'}
             </button>
@@ -1127,7 +1187,7 @@ export const Profile = ({ data, refreshData }) => {
           <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#334155', marginBottom: '12px' }}>Profile Picture</h3>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
-            <Avatar member={currentUser} size={64} />
+            <Avatar member={{...((editingMemberId ? allPlatformMembers.find(m => m["Member ID"] === editingMemberId) : currentUser) || currentUser), avatarUrl: pendingAvatarUrl || (editingMemberId ? allPlatformMembers.find(m => m["Member ID"] === editingMemberId)?.avatarUrl : currentUser.avatarUrl)}} size={64} />
             <div>
               <input type="file" id="avatarUpload" style={{ display: 'none' }} accept="image/*" onChange={handleFileChange} />
               <label htmlFor="avatarUpload" className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', padding: '8px 16px' }}>
@@ -1144,7 +1204,7 @@ export const Profile = ({ data, refreshData }) => {
                 key={av.id} 
                 src={av.url} 
                 alt="Avatar Option" 
-                style={{ width: '48px', height: '48px', borderRadius: '50%', cursor: 'pointer', border: '2px solid transparent' }} 
+                style={{ width: '48px', height: '48px', borderRadius: '50%', cursor: 'pointer', border: pendingGeneratedAvatarId === av.id ? '2px solid var(--rotary-blue)' : '2px solid transparent' }} 
                 onClick={() => handleSelectAvatar(av.id, av.url)}
                 onMouseOver={e => e.target.style.borderColor = 'var(--rotary-blue)'}
                 onMouseOut={e => e.target.style.borderColor = 'transparent'}

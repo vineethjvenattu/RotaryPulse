@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { BADGE_DEFINITIONS, evaluateCriteria } from '../utils/badges';
+import { BADGE_DEFINITIONS, evaluateCriteria, getCriteriaDeductions } from '../utils/badges';
 import { Award, Plus, Trash2, CheckCircle, X, Users, AlertCircle } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { Avatar } from '../components/Avatar';
@@ -32,6 +32,7 @@ export function AwardsManagement() {
   const [eligibleMembers, setEligibleMembers] = useState([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState(new Set());
   const [assigning, setAssigning] = useState(false);
+  const [showAllRecentApprovals, setShowAllRecentApprovals] = useState(false);
 
   useEffect(() => {
     if (currentUser?.chapterId && isPST) {
@@ -114,8 +115,16 @@ export function AwardsManagement() {
     members.forEach(member => {
       // Don't show if they already have this exact badge manually awarded
       const hasBadge = (member.badges || []).some(b => b.id === criteria.trophyId);
-      if (!hasBadge) {
-        const meets = evaluateCriteria(member["Member ID"], criteria, payments, attendance);
+      
+      // Don't show if they already have a pending proposal for this trophy
+      const isPending = approvals.some(app => 
+        app.status === 'pending' && 
+        app.badgeDefinition?.id === criteria.trophyId && 
+        app.memberIds.includes(member["Member ID"])
+      );
+
+      if (!hasBadge && !isPending) {
+        const meets = evaluateCriteria(member, criteria, payments, attendance);
         if (meets) {
           eligible.push(member);
         }
@@ -146,12 +155,21 @@ export function AwardsManagement() {
     setAssigning(true);
     const badgeDef = Object.values(BADGE_DEFINITIONS).find(b => b.id === selectedCriteria.trophyId);
     
+    const memberDeductions = {};
+    Array.from(selectedMemberIds).forEach(id => {
+      const member = members.find(m => m["Member ID"] === id || m.id === id);
+      if (member) {
+        memberDeductions[id] = getCriteriaDeductions(member, selectedCriteria, payments, attendance);
+      }
+    });
+
     const res = await api.proposeAward(
       currentUser.chapterId,
       selectedCriteria,
       Array.from(selectedMemberIds),
       badgeDef,
-      currentUser
+      currentUser,
+      memberDeductions
     );
     
     setAssigning(false);
@@ -227,6 +245,10 @@ export function AwardsManagement() {
 
   const manualTrophies = Object.values(BADGE_DEFINITIONS).filter(b => !['early_bird', 'philanthropist', 'active_participant', 'opinion_leader'].includes(b.id));
 
+  const pendingApprovalsList = approvals.filter(a => a.status === 'pending');
+  const pastApprovalsList = approvals.filter(a => a.status !== 'pending');
+  const visiblePastApprovals = showAllRecentApprovals ? pastApprovalsList : pastApprovalsList.slice(0, 5);
+
   return (
     <div className="content-area animate-fade-in">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -242,197 +264,263 @@ export function AwardsManagement() {
       {loading ? (
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>Loading criteria...</div>
       ) : (
-        <div style={{ display: 'flex', gap: '24px', flexDirection: 'column' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1fr', gap: '24px' }}>
           
-          {/* Pending Approvals Section */}
-          {approvals && approvals.length > 0 && (
-            <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px' }}>Pending Approvals</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {approvals.map(approval => (
-                  <div key={approval.id} style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h4 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>{approval.criteriaName}</h4>
-                      <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
-                        Proposed by {approval.initiator.name} ({approval.initiator.role}) for {approval.memberIds.length} members.
-                      </p>
-                      
-                      <div style={{ display: 'flex', gap: '16px', marginTop: '12px' }}>
-                        {Object.entries(approval.approvals).map(([role, statusData]) => (
-                          <div key={role} style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', color: statusData.status === 'approved' ? 'var(--success)' : statusData.status === 'rejected' ? 'var(--error)' : 'var(--text-secondary)' }}>
-                            {statusData.status === 'approved' && <CheckCircle size={14} />}
-                            {statusData.status === 'rejected' && <X size={14} />}
-                            {statusData.status === 'pending' && <AlertCircle size={14} />}
-                            {role}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    {/* Action buttons for current user if pending */}
-                    {approval.status === 'pending' && approval.approvals[currentUser.Role] && approval.approvals[currentUser.Role].status === 'pending' ? (
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button 
-                          className="btn btn-secondary" 
-                          onClick={() => handleRejectApproval(approval.id)}
-                          style={{ padding: '6px 12px', color: 'var(--error)', borderColor: 'var(--error)' }}
-                        >
-                          Reject
-                        </button>
-                        <button 
-                          className="btn btn-primary" 
-                          onClick={() => handleApproveApproval(approval.id)}
-                          style={{ padding: '6px 12px' }}
-                        >
-                          Approve
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '13px', fontWeight: 500, color: approval.status === 'completed' ? 'var(--success)' : approval.status === 'rejected' ? 'var(--error)' : 'var(--text-secondary)' }}>
-                        {approval.status.toUpperCase()}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Criteria Cards Grid */}
-          <div>
-            <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px' }}>Active Criteria</h3>
-            {criteriaCards.length === 0 ? (
-              <div style={{ padding: '32px', background: 'var(--bg-secondary)', borderRadius: '8px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                <Award size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
-                <p>No criteria cards created yet.</p>
-                <button className="btn btn-primary mt-4" onClick={() => setShowCreateModal(true)}>Create One Now</button>
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
-                {criteriaCards.map(criteria => {
-                  const badge = Object.values(BADGE_DEFINITIONS).find(b => b.id === criteria.trophyId);
-                  const isSelected = selectedCriteria?.id === criteria.id;
-                  
-                  return (
-                    <div 
-                      key={criteria.id}
-                      onClick={() => selectCriteria(criteria)}
-                      style={{ 
-                        background: 'white', 
-                        border: `2px solid ${isSelected ? 'var(--rotary-blue)' : 'var(--border-color)'}`, 
-                        borderRadius: '12px', 
-                        padding: '20px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease',
-                        boxShadow: isSelected ? '0 4px 12px rgba(11, 46, 126, 0.15)' : 'none',
-                        position: 'relative'
-                      }}
-                    >
-                      <button 
-                        onClick={(e) => handleDeleteCriteria(criteria.id, e)}
-                        style={{ position: 'absolute', top: '12px', right: '12px', background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', padding: '4px' }}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                      
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                        {badge && <img src={badge.image} alt={badge.name} style={{ width: '48px', height: '48px', objectFit: 'contain' }} />}
-                        <div>
-                          <h4 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>{criteria.name}</h4>
-                          <span style={{ fontSize: '13px', color: 'var(--rotary-blue)', fontWeight: 500 }}>{badge?.name}</span>
+          {/* Main Stage (Left Panel) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+            
+            {/* Pending Approvals Section */}
+            {pendingApprovalsList.length > 0 && (
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px' }}>Pending Approvals</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {pendingApprovalsList.map(approval => (
+                    <div key={approval.id} style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <h4 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>{typeof approval.criteriaName === 'object' ? approval.criteriaName?.name || JSON.stringify(approval.criteriaName) : approval.criteriaName}</h4>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                          Proposed by {approval.initiator.name} ({approval.initiator.role}) for: {
+                            approval.memberIds.map(id => {
+                              const m = members.find(mem => mem["Member ID"] === id || mem.id === id);
+                              return m ? m.Name : id;
+                            }).join(", ")
+                          }
+                        </p>
+                        
+                        <div style={{ display: 'flex', gap: '16px', marginTop: '12px' }}>
+                          {Object.entries(approval.approvals).map(([role, statusData]) => (
+                            <div key={role} style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', color: statusData.status === 'approved' ? 'var(--success)' : statusData.status === 'rejected' ? 'var(--error)' : 'var(--text-secondary)' }}>
+                              {statusData.status === 'approved' && <CheckCircle size={14} />}
+                              {statusData.status === 'rejected' && <X size={14} />}
+                              {statusData.status === 'pending' && <AlertCircle size={14} />}
+                              {role}
+                            </div>
+                          ))}
                         </div>
                       </div>
                       
-                      <div style={{ background: 'var(--bg-tertiary)', padding: '12px', borderRadius: '8px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-                        <div style={{ fontWeight: 600, marginBottom: '6px' }}>Criteria:</div>
-                        {(criteria.ruleGroups || [{ conditions: [{ metric: criteria.metric, operator: criteria.operator, value: criteria.value }] }]).map((group, gIdx) => (
-                          <div key={gIdx} style={{ marginBottom: gIdx < (criteria.ruleGroups?.length || 1) - 1 ? '8px' : 0 }}>
-                            {group.conditions.map((cond, cIdx) => (
-                              <span key={cIdx}>
-                                {formatCondition(cond)}
-                                {cIdx < group.conditions.length - 1 && <strong style={{ color: 'var(--rotary-blue)', margin: '0 6px' }}>AND</strong>}
-                              </span>
-                            ))}
-                            {gIdx < (criteria.ruleGroups?.length || 1) - 1 && <div style={{ fontWeight: 700, margin: '4px 0', color: 'var(--rotary-gold)' }}>OR</div>}
-                          </div>
-                        ))}
-                      </div>
-                      {isSelected && (
-                        <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }} className="animate-fade-in">
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                            <div>
-                              <h5 style={{ margin: '0 0 4px 0', fontSize: '15px', color: 'var(--rotary-blue-dark)' }}>Eligible Candidates ({eligibleMembers.length})</h5>
-                            </div>
-                            {eligibleMembers.length > 0 && (
-                              <button 
-                                className="btn btn-primary" 
-                                onClick={(e) => { e.stopPropagation(); handleAssignAwards(); }}
-                                disabled={selectedMemberIds.size === 0 || assigning}
-                                style={{ padding: '6px 12px', fontSize: '13px' }}
-                              >
-                                <Award size={14} style={{ marginRight: '6px' }} /> 
-                                {assigning ? 'Proposing...' : `Propose Award (${selectedMemberIds.size})`}
-                              </button>
-                            )}
-                          </div>
-                          
-                          {eligibleMembers.length === 0 ? (
-                            <div style={{ padding: '24px', textAlign: 'center', background: 'var(--bg-tertiary)', borderRadius: '8px', color: 'var(--text-secondary)' }}>
-                              <p style={{ margin: 0 }}>No eligible candidates found for this criteria.</p>
-                            </div>
-                          ) : (
-                            <div className="table-responsive" style={{ maxHeight: '250px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                              <table className="table" style={{ margin: 0 }}>
-                                <thead style={{ position: 'sticky', top: 0, background: 'white', zIndex: 1 }}>
-                                  <tr>
-                                    <th style={{ width: '40px', padding: '12px' }}>
-                                      <input 
-                                        type="checkbox" 
-                                        checked={selectedMemberIds.size === eligibleMembers.length && eligibleMembers.length > 0}
-                                        onChange={(e) => { e.stopPropagation(); handleToggleAll(); }}
-                                        onClick={(e) => e.stopPropagation()}
-                                      />
-                                    </th>
-                                    <th>Member</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {eligibleMembers.map(member => (
-                                    <tr 
-                                      key={member["Member ID"]} 
-                                      onClick={(e) => { e.stopPropagation(); handleToggleMember(member["Member ID"]); }}
-                                      style={{ cursor: 'pointer' }}
-                                    >
-                                      <td style={{ padding: '12px' }}>
-                                        <input 
-                                          type="checkbox" 
-                                          checked={selectedMemberIds.has(member["Member ID"])}
-                                          onChange={() => {}} 
-                                          onClick={(e) => e.stopPropagation()}
-                                        />
-                                      </td>
-                                      <td>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                          <Avatar name={member["Name"]} imageUrl={member["Profile Picture"]} size="32px" />
-                                          <div>
-                                            <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{member["Name"]}</div>
-                                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{member["Member ID"]}</div>
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
+                      {/* Action buttons for current user if pending */}
+                      {approval.status === 'pending' && approval.approvals[currentUser.Role] && approval.approvals[currentUser.Role].status === 'pending' && (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button 
+                            className="btn btn-secondary" 
+                            onClick={() => handleRejectApproval(approval.id)}
+                            style={{ padding: '6px 12px', color: 'var(--error)', borderColor: 'var(--error)' }}
+                          >
+                            Reject
+                          </button>
+                          <button 
+                            className="btn btn-primary" 
+                            onClick={() => handleApproveApproval(approval.id)}
+                            style={{ padding: '6px 12px' }}
+                          >
+                            Approve
+                          </button>
                         </div>
                       )}
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             )}
+
+            {/* Criteria Cards Grid */}
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--rotary-blue-dark)', marginBottom: '16px' }}>Active Criteria</h3>
+              {criteriaCards.length === 0 ? (
+                <div style={{ padding: '32px', background: 'white', borderRadius: '12px', border: '1px solid var(--border-color)', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  <Award size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
+                  <p>No criteria cards created yet.</p>
+                  <button className="btn btn-primary mt-4" onClick={() => setShowCreateModal(true)}>Create One Now</button>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+                  {criteriaCards.map(criteria => {
+                    const badge = Object.values(BADGE_DEFINITIONS).find(b => b.id === criteria.trophyId);
+                    const isSelected = selectedCriteria?.id === criteria.id;
+                    
+                    return (
+                      <div 
+                        key={criteria.id}
+                        onClick={() => selectCriteria(criteria)}
+                        style={{ 
+                          background: 'white', 
+                          border: `2px solid ${isSelected ? 'var(--rotary-blue)' : 'var(--border-color)'}`, 
+                          borderRadius: '12px', 
+                          padding: '20px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          boxShadow: isSelected ? '0 4px 12px rgba(11, 46, 126, 0.15)' : 'none',
+                          position: 'relative'
+                        }}
+                      >
+                        <button 
+                          onClick={(e) => handleDeleteCriteria(criteria.id, e)}
+                          style={{ position: 'absolute', top: '12px', right: '12px', background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', padding: '4px' }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                          {badge && <img src={badge.image} alt={badge.name} style={{ width: '48px', height: '48px', objectFit: 'contain' }} />}
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>{typeof criteria.name === 'object' ? criteria.name?.name || JSON.stringify(criteria.name) : criteria.name}</h4>
+                            <span style={{ fontSize: '13px', color: 'var(--rotary-blue)', fontWeight: 500 }}>{badge?.name}</span>
+                          </div>
+                        </div>
+                        
+                        <div style={{ background: 'var(--bg-tertiary)', padding: '12px', borderRadius: '8px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+                          <div style={{ fontWeight: 600, marginBottom: '6px' }}>Criteria:</div>
+                          {(criteria.ruleGroups || [{ conditions: [{ metric: criteria.metric, operator: criteria.operator, value: criteria.value }] }]).map((group, gIdx) => (
+                            <div key={gIdx} style={{ marginBottom: gIdx < (criteria.ruleGroups?.length || 1) - 1 ? '8px' : 0 }}>
+                              {group.conditions.map((cond, cIdx) => (
+                                <span key={cIdx}>
+                                  {formatCondition(cond)}
+                                  {cIdx < group.conditions.length - 1 && <strong style={{ color: 'var(--rotary-blue)', margin: '0 6px' }}>AND</strong>}
+                                </span>
+                              ))}
+                              {gIdx < (criteria.ruleGroups?.length || 1) - 1 && <div style={{ fontWeight: 700, margin: '4px 0', color: 'var(--rotary-gold)' }}>OR</div>}
+                            </div>
+                          ))}
+                        </div>
+                        {isSelected && (
+                          <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }} className="animate-fade-in">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                              <div>
+                                <h5 style={{ margin: '0 0 4px 0', fontSize: '15px', color: 'var(--rotary-blue-dark)' }}>Eligible Candidates ({eligibleMembers.length})</h5>
+                              </div>
+                              {eligibleMembers.length > 0 && (
+                                <button 
+                                  className="btn btn-primary" 
+                                  onClick={(e) => { e.stopPropagation(); handleAssignAwards(); }}
+                                  disabled={selectedMemberIds.size === 0 || assigning}
+                                  style={{ padding: '6px 12px', fontSize: '13px' }}
+                                >
+                                  <Award size={14} style={{ marginRight: '6px' }} /> 
+                                  {assigning ? 'Proposing...' : `Propose Award (${selectedMemberIds.size})`}
+                                </button>
+                              )}
+                            </div>
+                            
+                            {eligibleMembers.length === 0 ? (
+                              <div style={{ padding: '24px', textAlign: 'center', background: 'var(--bg-tertiary)', borderRadius: '8px', color: 'var(--text-secondary)' }}>
+                                <p style={{ margin: 0 }}>No eligible candidates found for this criteria.</p>
+                              </div>
+                            ) : (
+                              <div className="table-responsive" style={{ maxHeight: '250px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                                <table className="table" style={{ margin: 0 }}>
+                                  <thead style={{ position: 'sticky', top: 0, background: 'white', zIndex: 1 }}>
+                                    <tr>
+                                      <th style={{ width: '40px', padding: '12px' }}>
+                                        <input 
+                                          type="checkbox" 
+                                          checked={selectedMemberIds.size === eligibleMembers.length && eligibleMembers.length > 0}
+                                          onChange={(e) => { e.stopPropagation(); handleToggleAll(); }}
+                                          onClick={(e) => e.stopPropagation()}
+                                        />
+                                      </th>
+                                      <th>Member</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {eligibleMembers.map(member => (
+                                      <tr 
+                                        key={member["Member ID"]} 
+                                        onClick={(e) => { e.stopPropagation(); handleToggleMember(member["Member ID"]); }}
+                                        style={{ cursor: 'pointer' }}
+                                      >
+                                        <td style={{ padding: '12px' }}>
+                                          <input 
+                                            type="checkbox" 
+                                            checked={selectedMemberIds.has(member["Member ID"])}
+                                            onChange={() => {}} 
+                                            onClick={(e) => e.stopPropagation()}
+                                          />
+                                        </td>
+                                        <td>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                            <Avatar name={member["Name"]} imageUrl={member["Profile Picture"]} size="32px" />
+                                            <div>
+                                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{member["Name"]}</div>
+                                              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{member["Member ID"]}</div>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Panel */}
+          <div>
+            <div style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '20px' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Award size={18} style={{ color: 'var(--rotary-gold)' }} /> Recent Approvals
+              </h3>
+              
+              {pastApprovalsList.length === 0 ? (
+                <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0 }}>No past approvals.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {visiblePastApprovals.map(approval => (
+                    <div key={approval.id} style={{ background: 'var(--bg-tertiary)', borderRadius: '8px', padding: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                        <h4 style={{ margin: '0', fontSize: '14px', fontWeight: 600 }}>{typeof approval.criteriaName === 'object' ? approval.criteriaName?.name || JSON.stringify(approval.criteriaName) : approval.criteriaName}</h4>
+                        <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', background: approval.status === 'completed' ? '#dcfce7' : '#fee2e2', color: approval.status === 'completed' ? '#166534' : '#991b1b' }}>
+                          {approval.status.toUpperCase()}
+                        </span>
+                      </div>
+                      <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {approval.memberIds.length} member(s)
+                      </p>
+                      
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                        <div style={{ marginBottom: '4px' }}><strong>Proposed:</strong> {new Date(approval.createdAt).toLocaleDateString()} by {approval.initiator.name}</div>
+                        
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                          {Object.entries(approval.approvals).map(([role, statusData]) => (
+                            <div key={role} style={{ display: 'flex', alignItems: 'center', gap: '2px', color: statusData.status === 'approved' ? 'var(--success)' : statusData.status === 'rejected' ? 'var(--error)' : 'var(--text-secondary)' }}>
+                              {statusData.status === 'approved' ? <CheckCircle size={10} /> : <X size={10} />}
+                              {role}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {pastApprovalsList.length > 5 && !showAllRecentApprovals && (
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => setShowAllRecentApprovals(true)}
+                      style={{ width: '100%', fontSize: '13px', padding: '8px' }}
+                    >
+                      View More
+                    </button>
+                  )}
+                  {showAllRecentApprovals && (
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => setShowAllRecentApprovals(false)}
+                      style={{ width: '100%', fontSize: '13px', padding: '8px' }}
+                    >
+                      Show Less
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
