@@ -768,6 +768,76 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
         </button>
       </Modal>
 
+      {/* EDIT PROFILE MODAL */}
+      <Modal
+        isOpen={showEditProfileModal}
+        onClose={() => setShowEditProfileModal(false)}
+        title="Edit Profile"
+        subtitle={`Update details for ${selectedMember?.Name || "Member"}`}
+        footer={
+          <>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowEditProfileModal(false)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleRequestProfileEdit} disabled={savingProfile}>
+              {savingProfile ? 'Saving...' : 'Save Profile'}
+            </button>
+          </>
+        }
+      >
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Mobile Number</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Mobile} onChange={e => setEditProfileForm({...editProfileForm, Mobile: e.target.value})} />
+        </div>
+        
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Email ID</label>
+          <input type="email" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Email} onChange={e => setEditProfileForm({...editProfileForm, Email: e.target.value})} />
+        </div>
+        
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Blood Group</label>
+          <select className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm["Blood Group"]} onChange={e => setEditProfileForm({...editProfileForm, "Blood Group": e.target.value})}>
+            <option value="">-- Select --</option>
+            <option value="A+">A+</option>
+            <option value="A-">A-</option>
+            <option value="B+">B+</option>
+            <option value="B-">B-</option>
+            <option value="AB+">AB+</option>
+            <option value="AB-">AB-</option>
+            <option value="O+">O+</option>
+            <option value="O-">O-</option>
+          </select>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Birthday</label>
+          <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Birthday} onChange={e => setEditProfileForm({...editProfileForm, Birthday: e.target.value})} />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '24px' }}>
+          <label className="form-label">Anniversary</label>
+          <input type="date" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} value={editProfileForm.Anniversary} onChange={e => setEditProfileForm({...editProfileForm, Anniversary: e.target.value})} />
+        </div>
+
+        <div style={{ marginBottom: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#334155', margin: '0' }}>Business Information</h3>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Company Name</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="e.g. Acme Corp" value={editProfileForm.CompanyName} onChange={e => setEditProfileForm({...editProfileForm, CompanyName: e.target.value})} />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Industry</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="e.g. Real Estate, Healthcare" value={editProfileForm.Industry} onChange={e => setEditProfileForm({...editProfileForm, Industry: e.target.value})} />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '24px' }}>
+          <label className="form-label">Designation</label>
+          <input type="text" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }} placeholder="e.g. CEO, Founder" value={editProfileForm.BusinessDesignation} onChange={e => setEditProfileForm({...editProfileForm, BusinessDesignation: e.target.value})} />
+        </div>
+      </Modal>
+
       {/* EDIT MODAL (President Only) */}
       <Modal
         isOpen={showEditModal && !!selectedMember}
