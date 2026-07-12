@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Phone, MessageCircle, Mail, X, Info, ArrowLeft, Edit2, AlertCircle, Award, Lock } from 'lucide-react';
+import { Search, Phone, MessageCircle, Mail, X, Info, ArrowLeft, Edit2, AlertCircle, Award, Lock, Settings } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import Papa from 'papaparse';
