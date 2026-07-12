@@ -319,6 +319,8 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
   let memberApprovals = [];
   let deletionApprovals = [];
   let relationApprovals = [];
+  let clubDetailsApprovals = [];
+  let profileEditApprovals = [];
   
   if (isPST) {
     memberApprovals = pendingMembers.map(m => ({
@@ -332,7 +334,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
 
     deletionApprovals = deletionRequests.filter(r => {
       const consent = r.consents?.[currentUser.Role];
-      return !consent || consent.status === 'pending';
+      return consent && consent.status === 'pending';
     }).map(r => ({
       "Task ID": `deletion_approval_${r.id}`,
       "Title": `Member Deletion Approval: ${r.memberName}`,
@@ -342,9 +344,9 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       "requestId": r.id
     }));
 
-    const clubDetailsApprovals = pendingClubDetails.filter(c => {
+    clubDetailsApprovals = pendingClubDetails.filter(c => {
       const approvals = c.Approvals || [];
-      return !approvals.includes(currentUserId);
+      return !approvals.includes(currentUserId) && c["Proposed By"] !== currentUserId;
     }).map(c => ({
       "Task ID": `club_details_${c.id}`,
       "Title": `Club Details Change Approval (by ${c["Proposed By Name"]})`,
@@ -355,9 +357,9 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
       "originalEdit": c
     }));
 
-    const profileEditApprovals = pendingProfileEdits.filter(p => {
+    profileEditApprovals = pendingProfileEdits.filter(p => {
       const approvals = p.Approvals || [];
-      return !approvals.includes(currentUserId);
+      return !approvals.includes(currentUserId) && p["Proposed By"] !== currentUserId;
     }).map(p => ({
       "Task ID": `profile_edit_${p.id}`,
       "Title": `Profile Edit Approval: ${p["Target Member Name"]} (by ${p["Proposed By Name"]})`,
@@ -379,7 +381,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
     }));
   }
 
-  myTasks = [...myTasks, ...myOpinionActions, ...myAwardApprovals, ...memberApprovals, ...deletionApprovals, ...relationApprovals, ...(isPST ? pendingClubDetails.filter(c => !(c.Approvals || []).includes(currentUserId)).map(c => ({ "Task ID": `club_details_${c.id}`, "Title": `Club Details Change (by ${c["Proposed By Name"]})`, "Status": "Pending", "isClubDetailsApproval": true, "editId": c.id, "originalEdit": c })) : []), ...(isPST ? pendingProfileEdits.filter(p => !(p.Approvals || []).includes(currentUserId)).map(p => ({ "Task ID": `profile_edit_${p.id}`, "Title": `Profile Edit: ${p["Target Member Name"]} (by ${p["Proposed By Name"]})`, "Status": "Pending", "isProfileEditApproval": true, "editId": p.id, "originalEdit": p })) : [])];
+  myTasks = [...myTasks, ...myOpinionActions, ...myAwardApprovals, ...memberApprovals, ...deletionApprovals, ...relationApprovals, ...clubDetailsApprovals, ...profileEditApprovals];
 
   // 3. Meeting Projection Data
   const currentMeetingId = nextEvent?.["Event ID"] || "";
