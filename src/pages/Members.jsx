@@ -442,7 +442,7 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
                 <ArrowLeft size={20} color="white" />
               </button>
               <div className="drawer-header-actions">
-                {isPresident && (
+                {isPST && (
                   <>
                   <button className="drawer-edit-btn" style={{ marginRight: "8px", background: "var(--rotary-blue)" }} onClick={() => { 
                     setEditProfileForm({
