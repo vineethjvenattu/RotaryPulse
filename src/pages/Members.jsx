@@ -79,25 +79,43 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
   const handleRequestProfileEdit = async () => {
     if (!selectedMember) return;
     setSavingProfile(true);
-    let requiredApprovers = ["president", "secretary", "treasurer"];
-    const userRole = currentUser?.Role ? String(currentUser.Role).trim().toLowerCase() : "";
-    if (requiredApprovers.includes(userRole)) {
-      requiredApprovers = requiredApprovers.filter(r => r !== userRole);
-    }
-    const result = await api.requestProfileEdit(
-      currentUser.chapterId, 
-      selectedMember["Member ID"] || selectedMember.id, 
-      selectedMember.Name, 
-      editProfileForm, 
-      currentUser, 
-      requiredApprovers
-    );
-    setSavingProfile(false);
-    if (result.success) {
-      alert("Profile edit proposed successfully! It will be applied once other PST members approve.");
-      setShowEditProfileModal(false);
+    
+    // PST members can edit any profiles directly without approval
+    if (isPST || String(currentUser?.Role).trim().toLowerCase() === 'superadmin') {
+      const result = await api.updateUserProfile(
+        currentUser.chapterId,
+        selectedMember["Member ID"] || selectedMember.id,
+        editProfileForm
+      );
+      setSavingProfile(false);
+      if (result.success) {
+        alert("Profile updated successfully!");
+        if (refreshData) refreshData(true);
+        setShowEditProfileModal(false);
+      } else {
+        alert("Error updating profile: " + result.error);
+      }
     } else {
-      alert("Error proposing profile edit: " + result.error);
+      let requiredApprovers = ["president", "secretary", "treasurer"];
+      const userRole = currentUser?.Role ? String(currentUser.Role).trim().toLowerCase() : "";
+      if (requiredApprovers.includes(userRole)) {
+        requiredApprovers = requiredApprovers.filter(r => r !== userRole);
+      }
+      const result = await api.requestProfileEdit(
+        currentUser.chapterId, 
+        selectedMember["Member ID"] || selectedMember.id, 
+        selectedMember.Name, 
+        editProfileForm, 
+        currentUser, 
+        requiredApprovers
+      );
+      setSavingProfile(false);
+      if (result.success) {
+        alert("Profile edit proposed successfully! It will be applied once other PST members approve.");
+        setShowEditProfileModal(false);
+      } else {
+        alert("Error proposing profile edit: " + result.error);
+      }
     }
   };
 
