@@ -370,7 +370,7 @@ export const Dashboard = ({ data, loading, setActiveTab, refreshData }) => {
 
     relationApprovals = pendingRelations.map(rel => ({
       "Task ID": `relation_approval_${rel.memberId}_${rel.relationIndex}`,
-      "Title": `Family Relation Approval: ${rel.relation?.Name} (for ${rel.memberName})`,
+      "Title": `Family Relation Approval: ${rel.name} as ${rel.relation} (for ${rel.memberName})`,
       "Target Date": "Pending",
       "Status": "Pending",
       "isRelationApproval": true,
