@@ -1652,12 +1652,27 @@ export const api = {
     try {
       const snap = await getDocs(collection(db, "chapters", chapterId, "members"));
       const pending = [];
+      const seenPairs = new Set();
+      
       snap.forEach(docSnap => {
         const data = docSnap.data();
         if (data.FamilyMembers && Array.isArray(data.FamilyMembers)) {
           data.FamilyMembers.forEach((fm, index) => {
             if (fm.status === 'pending') {
-              pending.push({ memberId: docSnap.id, memberName: data.Name, relationIndex: index, ...fm });
+              let skip = false;
+              if (fm.id && fm.isRotarian) {
+                const pair1 = `${docSnap.id}_${fm.id}`;
+                const pair2 = `${fm.id}_${docSnap.id}`;
+                if (seenPairs.has(pair1) || seenPairs.has(pair2)) {
+                  skip = true;
+                } else {
+                  seenPairs.add(pair1);
+                  seenPairs.add(pair2);
+                }
+              }
+              if (!skip) {
+                pending.push({ memberId: docSnap.id, memberName: data.Name, relationIndex: index, ...fm });
+              }
             }
           });
         }
