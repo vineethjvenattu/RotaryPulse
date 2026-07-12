@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Phone, MessageCircle, Mail, X, Info, ArrowLeft, Edit2, AlertCircle, Award } from 'lucide-react';
+import { Search, Phone, MessageCircle, Mail, X, Info, ArrowLeft, Edit2, AlertCircle, Award, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import Papa from 'papaparse';
 import { Avatar } from '../components/Avatar';
 import { Modal } from '../components/Modal';
+import { UpgradeModal } from '../components/UpgradeModal';
 import confetti from 'canvas-confetti';
 import './pages.css';
 
-export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMemberId }) => {
-  const { isPresident, currentUser, role } = useAuth();
+export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMemberId, setActiveTab }) => {
+  const { isPresident, isSecretary, isTreasurer, currentUser, role } = useAuth();
+  const isPST = isPresident || isSecretary || isTreasurer;
+  const canViewContacts = currentUser?.subscriptionStatus === 'Active' || isPST || currentUser?.isSuperAdmin;
   const [chapterSettings, setChapterSettings] = useState(null);
   const [globalRoles, setGlobalRoles] = useState([]);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [classificationFilter, setClassificationFilter] = useState('');
   const [bloodGroupFilter, setBloodGroupFilter] = useState('');
@@ -330,27 +334,41 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
                     <div className="member-meta-info">
                       <div className="member-name-text">{member["Name"]}</div>
                       <div className="member-card-role">{member["Role"]}</div>
-                      <div className="member-card-phone">{member["Mobile"]}</div>
+                      <div className="member-card-phone">
+                        {canViewContacts ? member["Mobile"] : <span onClick={(e) => { e.stopPropagation(); setShowUpgradeModal(true); }} style={{display: 'flex', alignItems: 'center', gap: '4px', color: '#94a3b8', cursor: 'pointer'}}><Lock size={12} style={{ color: 'var(--rotary-gold)' }}/> ******</span>}
+                      </div>
                       {member["Rotary ID"] && <div className="member-card-rid" style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>ID: {member["Rotary ID"]}</div>}
                       
                       <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        {getDynamicFields(member).map(field => (
-                          <div key={field} style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                            <span style={{ fontWeight: 500 }}>{field}:</span> {formatFieldValue(field, member[field], member["Member ID"])}
-                          </div>
-                        ))}
+                        {getDynamicFields(member).map(field => {
+                          const isContactField = ['Email', 'Mobile', 'Phone', 'Address', 'Residence Address', 'Office Address', 'Birthday', 'Wedding Anniversary', 'Spouse Name'].includes(field);
+                          const displayValue = (!canViewContacts && isContactField) 
+                            ? <span onClick={(e) => { e.stopPropagation(); setShowUpgradeModal(true); }} style={{display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#94a3b8', cursor: 'pointer'}}><Lock size={12} style={{ color: 'var(--rotary-gold)' }}/> ******</span>
+                            : formatFieldValue(field, member[field], member["Member ID"]);
+                          return (
+                            <div key={field} style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                              <span style={{ fontWeight: 500 }}>{field}:</span> {displayValue}
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {chapterSettings?.showRelations && member.FamilyMembers?.some(fm => fm.status === 'approved') && (
                         <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--border-color)' }}>
                           <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '4px' }}>RELATIONS</div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                            {member.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
-                              <div key={idx} style={{ padding: '2px 8px', borderRadius: '12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', fontSize: '11px', color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--rotary-gold)' }}></div>
-                                {fm.name} <span style={{ opacity: 0.6 }}>({fm.relation})</span>
+                            {canViewContacts ? (
+                              member.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
+                                <div key={idx} style={{ padding: '2px 8px', borderRadius: '12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', fontSize: '11px', color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--rotary-gold)' }}></div>
+                                  {fm.name} <span style={{ opacity: 0.6 }}>({fm.relation})</span>
+                                </div>
+                              ))
+                            ) : (
+                              <div onClick={(e) => { e.stopPropagation(); setShowUpgradeModal(true); }} style={{ padding: '2px 8px', borderRadius: '12px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', fontSize: '11px', color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                <Lock size={10} style={{ color: 'var(--rotary-gold)' }} /> ******
                               </div>
-                            ))}
+                            )}
                           </div>
                         </div>
                       )}
@@ -375,7 +393,9 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
                     <div className="member-meta-info">
                       <div className="member-name-text">{member["Name"]}</div>
                       <div className="member-card-role">{member["Role"]}</div>
-                      <div className="member-card-phone">{member["Mobile"]}</div>
+                      <div className="member-card-phone">
+                        {canViewContacts ? member["Mobile"] : <span style={{display: 'flex', alignItems: 'center', gap: '4px', color: '#94a3b8'}}><Lock size={12}/> +91 ******</span>}
+                      </div>
                       {member["Rotary ID"] && <div className="member-card-rid" style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>ID: {member["Rotary ID"]}</div>}
                       
                       <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -477,26 +497,35 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
 
             {/* Direct Dial / Message / Email triggers */}
             <div className="member-detail-actions">
-              <a href={`tel:${selectedMember["Mobile"]}`} className="contact-action-btn">
+              <a 
+                href={canViewContacts ? `tel:${selectedMember.Mobile}` : '#'}
+                onClick={(e) => { if (!canViewContacts) { e.preventDefault(); setShowUpgradeModal(true); } }}
+                className="contact-action-btn"
+              >
                 <div className="contact-action-icon">
-                  <Phone size={20} />
+                  {canViewContacts ? <Phone size={20} /> : <Lock size={20} />}
                 </div>
                 <span>Call</span>
               </a>
               <a 
-                href={`https://wa.me/91${selectedMember["Mobile"]}?text=Hi%20${encodeURIComponent(selectedMember["Name"])}`} 
+                href={canViewContacts ? `https://wa.me/91${selectedMember["Mobile"]}?text=Hi%20${encodeURIComponent(selectedMember["Name"])}` : '#'} 
+                onClick={(e) => { if (!canViewContacts) { e.preventDefault(); setShowUpgradeModal(true); } }}
                 target="_blank" 
                 rel="noreferrer" 
                 className="contact-action-btn"
               >
                 <div className="contact-action-icon">
-                  <MessageCircle size={20} />
+                  {canViewContacts ? <MessageCircle size={20} /> : <Lock size={20} />}
                 </div>
                 <span>Message</span>
               </a>
-              <a href={`mailto:${selectedMember["Email"]}`} className="contact-action-btn">
+              <a 
+                href={canViewContacts ? `mailto:${selectedMember.Email}` : '#'} 
+                onClick={(e) => { if (!canViewContacts) { e.preventDefault(); setShowUpgradeModal(true); } }}
+                className="contact-action-btn"
+              >
                 <div className="contact-action-icon">
-                  <Mail size={20} />
+                  {canViewContacts ? <Mail size={20} /> : <Lock size={20} />}
                 </div>
                 <span>Email</span>
               </a>
@@ -510,47 +539,63 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
               </div>
               <div className="detail-field-row">
                 <span className="detail-field-label">Phone</span>
-                <span className="detail-field-value">{selectedMember["Mobile"]}</span>
+                <span className="detail-field-value">
+                  {canViewContacts ? selectedMember["Mobile"] : <span onClick={(e) => { e.preventDefault(); setShowUpgradeModal(true); }} style={{display: 'flex', alignItems: 'center', gap: '4px', color: '#94a3b8', cursor: 'pointer'}}><Lock size={12} style={{ color: 'var(--rotary-gold)' }}/> ******</span>}
+                </span>
               </div>
               
               {/* Dynamic Non-System Fields */}
               {Object.keys(selectedMember)
                 .filter(k => !systemFields.includes(k))
                 .sort(sortFields)
-                .map(field => (
-                  <div className="detail-field-row" key={field}>
-                    <span className="detail-field-label">{field}</span>
-                    <span className="detail-field-value" style={field === 'Email' ? { wordBreak: 'break-all' } : {}}>{formatFieldValue(field, selectedMember[field] || "Not Specified", selectedMember["Member ID"])}</span>
-                  </div>
-              ))}
+                .map(field => {
+                  const isContactField = ['Email', 'Mobile', 'Phone', 'Address', 'Residence Address', 'Office Address', 'Birthday', 'Wedding Anniversary', 'Spouse Name'].includes(field);
+                  const displayValue = (!canViewContacts && isContactField) 
+                    ? <span onClick={(e) => { e.preventDefault(); setShowUpgradeModal(true); }} style={{display: 'flex', alignItems: 'center', gap: '4px', color: '#94a3b8', cursor: 'pointer'}}><Lock size={12} style={{ color: 'var(--rotary-gold)' }}/> ******</span>
+                    : formatFieldValue(field, selectedMember[field] || "Not Specified", selectedMember["Member ID"]);
+                    
+                  return (
+                    <div className="detail-field-row" key={field}>
+                      <span className="detail-field-label">{field}</span>
+                      <span className="detail-field-value" style={field === 'Email' ? { wordBreak: 'break-all' } : {}}>{displayValue}</span>
+                    </div>
+                  );
+                })}
               
               {selectedMember.FamilyMembers?.some(fm => fm.status === 'approved') && (
                 <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
                   <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-primary)' }}>Family members</h4>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                    {selectedMember.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
-                      <div 
-                        key={idx} 
-                        style={{ 
-                          display: 'flex', 
-                          flexDirection: 'column', 
-                          alignItems: 'center', 
-                          background: '#ffffff', 
-                          border: '1px solid var(--border-color)', 
-                          padding: '12px', 
-                          borderRadius: '8px', 
-                          width: '80px', 
-                          textAlign: 'center',
-                        }}
-                      >
-                        <Avatar member={members?.find(m => m["Member ID"] === fm.id) || { Name: fm.name }} size={48} />
-                        <div style={{ marginTop: '8px', width: '100%' }}>
-                          <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.2' }}>{typeof fm.name === 'object' ? fm.name?.name || JSON.stringify(fm.name) : fm.name}</div>
-                          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>{fm.relation}</div>
+                  {canViewContacts ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                      {selectedMember.FamilyMembers.filter(fm => fm.status === 'approved').map((fm, idx) => (
+                        <div 
+                          key={idx} 
+                          style={{ 
+                            display: 'flex', 
+                            flexDirection: 'column', 
+                            alignItems: 'center', 
+                            background: '#ffffff', 
+                            border: '1px solid var(--border-color)', 
+                            padding: '12px', 
+                            borderRadius: '8px', 
+                            width: '80px', 
+                            textAlign: 'center',
+                          }}
+                        >
+                          <Avatar member={members?.find(m => m["Member ID"] === fm.id) || { Name: fm.name }} size={48} />
+                          <div style={{ marginTop: '8px', width: '100%' }}>
+                            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.2' }}>{typeof fm.name === 'object' ? fm.name?.name || JSON.stringify(fm.name) : fm.name}</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>{fm.relation}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div onClick={(e) => { e.preventDefault(); setShowUpgradeModal(true); }} style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', background: '#f8fafc', borderRadius: '8px', cursor: 'pointer'}}>
+                      <Lock size={16} style={{ color: 'var(--rotary-gold)' }}/>
+                      <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>******</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -788,6 +833,15 @@ export const Members = ({ data, loading, refreshData, viewMemberId, clearViewMem
           <button className="btn btn-secondary" onClick={() => setSelectedBadgeForDates(null)}>Close</button>
         </div>
       </Modal>
+
+      <UpgradeModal 
+        isOpen={showUpgradeModal} 
+        onClose={() => setShowUpgradeModal(false)}
+        onUpgrade={() => {
+          setShowUpgradeModal(false);
+          setActiveTab('subscription');
+        }}
+      />
     </div>
   );
 };

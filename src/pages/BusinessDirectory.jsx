@@ -1,11 +1,18 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Briefcase, Phone, Mail, Building } from 'lucide-react';
+import { Search, Briefcase, Phone, Mail, Building, Lock } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { Avatar } from '../components/Avatar';
+import { UpgradeModal } from '../components/UpgradeModal';
 import './pages.css';
 
-export const BusinessDirectory = ({ data }) => {
+export const BusinessDirectory = ({ data, setActiveTab }) => {
+  const { currentUser, isPresident, isSecretary, isTreasurer } = useAuth();
+  const isPST = isPresident || isSecretary || isTreasurer;
+  const canViewContacts = currentUser?.subscriptionStatus === 'Active' || isPST || currentUser?.isSuperAdmin;
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIndustry, setSelectedIndustry] = useState('All');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const members = data?.members || [];
 
@@ -110,13 +117,21 @@ export const BusinessDirectory = ({ data }) => {
 
                 <div style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {member.Mobile && (
-                    <a href={`tel:${member.Mobile}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '13px', textDecoration: 'none' }}>
-                      <Phone size={14} /> {member.Mobile}
+                    <a 
+                      href={canViewContacts ? `tel:${member.Mobile}` : '#'} 
+                      onClick={(e) => { if (!canViewContacts) { e.preventDefault(); setShowUpgradeModal(true); } }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '13px', textDecoration: 'none' }}
+                    >
+                      {canViewContacts ? <Phone size={14} /> : <Lock size={14} style={{ color: 'var(--rotary-gold)' }} />} {canViewContacts ? member.Mobile : <span style={{color: '#94a3b8'}}>******</span>}
                     </a>
                   )}
                   {member.Email && (
-                    <a href={`mailto:${member.Email}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '13px', textDecoration: 'none', wordBreak: 'break-all' }}>
-                      <Mail size={14} /> {member.Email}
+                    <a 
+                      href={canViewContacts ? `mailto:${member.Email}` : '#'} 
+                      onClick={(e) => { if (!canViewContacts) { e.preventDefault(); setShowUpgradeModal(true); } }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '13px', textDecoration: 'none', wordBreak: 'break-all' }}
+                    >
+                      {canViewContacts ? <Mail size={14} /> : <Lock size={14} style={{ color: 'var(--rotary-gold)' }} />} {canViewContacts ? member.Email : <span style={{color: '#94a3b8'}}>******</span>}
                     </a>
                   )}
                 </div>
@@ -126,6 +141,15 @@ export const BusinessDirectory = ({ data }) => {
           ))}
         </div>
       )}
+
+      <UpgradeModal 
+        isOpen={showUpgradeModal} 
+        onClose={() => setShowUpgradeModal(false)}
+        onUpgrade={() => {
+          setShowUpgradeModal(false);
+          setActiveTab('subscription');
+        }}
+      />
     </div>
   );
 };

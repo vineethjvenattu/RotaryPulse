@@ -356,16 +356,14 @@ function AppContent() {
       case 'dashboard':
         return <Dashboard data={data} loading={loading} setActiveTab={setActiveTab} refreshData={refreshData} />;
       case 'directory':
-        if (currentUser.subscriptionStatus !== 'Active') return <Subscription />;
-        return <BusinessDirectory data={data} />;
+        return <BusinessDirectory data={data} setActiveTab={setActiveTab} />;
       case 'marketplace':
         if (currentUser.subscriptionStatus !== 'Active') return <Subscription />;
         return <Marketplace data={data} />;
       case 'subscription':
         return <Subscription />;
       case 'members':
-        if (currentUser.subscriptionStatus !== 'Active') return <Subscription />;
-        return <Members data={data} loading={loading} refreshData={refreshData} viewMemberId={globalViewMemberId} clearViewMemberId={() => setGlobalViewMemberId(null)} />;
+        return <Members data={data} loading={loading} refreshData={refreshData} viewMemberId={globalViewMemberId} clearViewMemberId={() => setGlobalViewMemberId(null)} setActiveTab={setActiveTab} />;
       case 'events':
         return <Events data={data} loading={loading} refreshData={refreshData} />;
       case 'attendance':

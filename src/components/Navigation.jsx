@@ -72,7 +72,9 @@ export const RotaryLogo = ({ className }) => (
 );
 
 export const Navigation = ({ activeTab, setActiveTab, data }) => {
-  const { currentUser, globalConfig, logout, canMarkAttendance, isTreasurer, isPresident } = useAuth();
+  const { currentUser, globalConfig, logout, canMarkAttendance, isTreasurer, isPresident, isSecretary } = useAuth();
+  const isPST = isPresident || isSecretary || isTreasurer;
+  const canViewPremiumFeatures = currentUser?.subscriptionStatus === 'Active' || isPST || currentUser?.isSuperAdmin;
   const [showMobileMore, setShowMobileMore] = useState(false);
   const [uploadingCSV, setUploadingCSV] = useState(false);
   const fileInputRef = useRef(null);
@@ -294,7 +296,7 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
                   )}
                 </span>
                 {item.label}
-                {currentUser?.subscriptionStatus !== 'Active' && ['directory', 'marketplace', 'members'].includes(item.id) && (
+                {!canViewPremiumFeatures && ['directory', 'marketplace', 'members'].includes(item.id) && (
                   <Lock size={12} style={{ marginLeft: 'auto', color: 'var(--rotary-gold)' }} />
                 )}
               </button>
@@ -430,7 +432,7 @@ export const Navigation = ({ activeTab, setActiveTab, data }) => {
                       )}
                     </span>
                     {item.label}
-                    {currentUser?.subscriptionStatus !== 'Active' && ['directory', 'marketplace', 'members'].includes(item.id) && (
+                    {!canViewPremiumFeatures && ['directory', 'marketplace', 'members'].includes(item.id) && (
                       <Lock size={12} style={{ marginLeft: 'auto', color: 'var(--rotary-gold)' }} />
                     )}
                   </button>
