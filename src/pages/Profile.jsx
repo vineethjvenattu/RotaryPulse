@@ -359,7 +359,8 @@ export const Profile = ({ data, refreshData }) => {
     const coreRoles = (configRes.success && configRes.config && configRes.config.coreCommitteeRoles) ? configRes.config.coreCommitteeRoles : ['President', 'Secretary', 'Treasurer'];
     const isCore = coreRoles.includes(currentUser.Role) || currentUser.isSuperAdmin;
     
-    const finalForm = { ...familyForm, status: isCore ? 'approved' : 'pending' };
+    // Auto-approve if they are PST or if it's a non-Rotarian family member
+    const finalForm = { ...familyForm, status: (isCore || linkMode !== 'existing') ? 'approved' : 'pending' };
 
     if (linkMode === 'existing' && selectedMemberId && !selectedMemberId.startsWith('fm_')) {
       finalForm.id = selectedMemberId;
@@ -648,6 +649,11 @@ export const Profile = ({ data, refreshData }) => {
                     <div style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-secondary)', textAlign: 'center', background: '#f1f5f9', padding: '4px 10px', borderRadius: '16px' }}>
                       {fm.relation}
                     </div>
+                    {fm.status === 'pending' && (
+                      <div style={{ marginTop: '8px', fontSize: '10px', fontWeight: 600, color: '#eab308', background: '#fef9c3', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fef08a' }}>
+                        Pending PST Approval
+                      </div>
+                    )}
 
                     {!platformMember && (
                       <button 
