@@ -1675,11 +1675,34 @@ export const api = {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const family = data.FamilyMembers || [];
-        if (family[relationIndex]) {
-          family[relationIndex].status = 'approved';
+        const fm = family[relationIndex];
+        if (fm) {
+          fm.status = 'approved';
           const batch = writeBatch(db);
           batch.update(docRef, { FamilyMembers: family });
           batch.update(doc(db, "users", memberId), { FamilyMembers: family });
+          
+          // Auto-approve reciprocal link
+          if (fm.isRotarian && fm.id) {
+            const targetRef = doc(db, "chapters", chapterId, "members", fm.id);
+            const targetSnap = await getDoc(targetRef);
+            if (targetSnap.exists()) {
+              const targetData = targetSnap.data();
+              const targetFamily = targetData.FamilyMembers || [];
+              let reciprocalUpdated = false;
+              for (let i = 0; i < targetFamily.length; i++) {
+                if (targetFamily[i].id === memberId && targetFamily[i].status === 'pending') {
+                  targetFamily[i].status = 'approved';
+                  reciprocalUpdated = true;
+                }
+              }
+              if (reciprocalUpdated) {
+                batch.update(targetRef, { FamilyMembers: targetFamily });
+                batch.update(doc(db, "users", fm.id), { FamilyMembers: targetFamily });
+              }
+            }
+          }
+
           await batch.commit();
         }
       }
@@ -1695,12 +1718,32 @@ export const api = {
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const family = data.FamilyMembers || [];
-        if (family[relationIndex]) {
-          family.splice(relationIndex, 1);
+        let family = data.FamilyMembers || [];
+        const fm = family[relationIndex];
+        if (fm) {
           const batch = writeBatch(db);
+          
+          // Auto-reject (remove) reciprocal link
+          if (fm.isRotarian && fm.id) {
+            const targetRef = doc(db, "chapters", chapterId, "members", fm.id);
+            const targetSnap = await getDoc(targetRef);
+            if (targetSnap.exists()) {
+              const targetData = targetSnap.data();
+              let targetFamily = targetData.FamilyMembers || [];
+              const initialLen = targetFamily.length;
+              // Remove any pending link back to memberId
+              targetFamily = targetFamily.filter(tfm => !(tfm.id === memberId && tfm.status === 'pending'));
+              if (targetFamily.length !== initialLen) {
+                batch.update(targetRef, { FamilyMembers: targetFamily });
+                batch.update(doc(db, "users", fm.id), { FamilyMembers: targetFamily });
+              }
+            }
+          }
+
+          family.splice(relationIndex, 1);
           batch.update(docRef, { FamilyMembers: family });
           batch.update(doc(db, "users", memberId), { FamilyMembers: family });
+
           await batch.commit();
         }
       }
