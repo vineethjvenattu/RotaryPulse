@@ -18,6 +18,8 @@ The application supports four primary user roles, each with distinct permissions
 | Feature / Module | Member | Secretary | Treasurer | President (Admin) |
 | :--- | :---: | :---: | :---: | :---: |
 | **View Directory & Profiles** | Read-Only | Read / Write | Read-Only | Read / Write |
+| **View Member PII / Contacts** | Premium Required | Full Access | Full Access | Full Access |
+| **Business Directory** | Read-Only | Read / Write | Read-Only | Read / Write |
 | **Announcements** | Read-Only | Read / Write | Read-Only | Read / Write |
 | **Events & Meetings** | Read & RSVP | Read / Write | Read-Only | Read / Write |
 | **Mark Attendance** | None | Read / Write | None | Read / Write |
@@ -50,20 +52,26 @@ The application supports four primary user roles, each with distinct permissions
 - **Profile Detail View**:
   - Full-screen drawer layout on mobile.
   - Profile attributes: Classification, Blood Group, Birthday, Wedding Anniversary, Profile Image Upload.
+- **PII Masking**: For non-premium members, all Personally Identifiable Information (Phone, Email, Addresses, Birthday, Family Members) is masked with `******` and locked. Clicking a locked field prompts an Upgrade Modal.
 
-### 3.4. Events & Meetings
+### 3.4. Business Directory
+- **Listing View**: Grid of business cards displaying Firm Name, Logo/Avatar, Rotarian Name, Industry, and Services.
+- **Filtering**: Real-time search across firm names and industries.
+- **Contact Access**: Similar to the Member Directory, business contact details (Phone, Email, Website) are locked and masked for non-premium members.
+
+### 3.5. Events & Meetings
 - **Tabbed View**: Categorized into *Upcoming* and *Past* events.
 - **Event Cards**: Display date badge, event title, time, venue, and description.
 - **Meeting Console**: Deep integration for Secretaries/Presidents to manage meetings (Minutes, Tasks, Notes, Opinions).
 
-### 3.5. Attendance Tracking
+### 3.6. Attendance Tracking
 - **Event Selection**: List of events requiring attendance registration.
 - **Quick Search**: Search bar to quickly locate members.
 - **Status Toggles**: Mobile-optimized, inline toggles for Present/Absent.
 - **QR Code Check-in**: Generates a dynamic QR code for an event. Members can scan it using their mobile device to self-check-in, which directly updates the central Firebase database. Duplicate check-ins are prevented.
 - **Summary Header**: Responsive 3-column statistics for Present, Absent, and Total strength.
 
-### 3.6. Payments, Dues & Committee Approvals
+### 3.7. Payments, Dues & Committee Approvals
 - **Dues Tab**: Displays outstanding amount, due date, and a "Pay Now" simulated gateway.
 - **Receivable Creation**: President and Treasurer can bulk-create receivables (dues) for selected members.
 - **Payment Edit Approval Workflow (2-of-3 Rule)**:
@@ -73,10 +81,16 @@ The application supports four primary user roles, each with distinct permissions
   - The proposer can withdraw the edit before it is approved.
   - Rejected edits are flagged with the rejector's name.
 
-### 3.7. Announcements (Notice Board)
+### 3.8. Premium Subscription Model
+- **Subscription Tiers**: Members can be Free or Premium (determined by `subscriptionStatus`).
+- **Contact Visibility Restrictions**: Non-premium members cannot view the contact details or PII of other members in the Member and Business Directories.
+- **Exemptions**: The Core Committee (President, Secretary, Treasurer) and Super Admins bypass all premium restrictions and have full visibility of all contacts.
+- **Upgrade Flow**: Blocked actions trigger a polished, interactive `UpgradeModal` prompting users to "Unlock Contact Details," which seamlessly navigates them to a Subscription/Payment page.
+
+### 3.9. Announcements (Notice Board)
 - **Notice Feed**: Feed of official announcements ordered chronologically.
 
-### 3.8. Feedback Management
+### 3.10. Feedback Management
 - **Feedback Widget**: Floating widget accessible across the app for members to submit feedback (bug reports, feature requests, general).
 - **Admin Feedback Menu**: Dedicated menu for the Core Committee to review submitted feedbacks.
 - **Notification System**: Global bell icon displaying a notification badge for the count of *unacknowledged* feedbacks.
@@ -100,7 +114,7 @@ The application utilizes Google Firebase for robust, real-time data management:
 ## 5. Data Schema (Firestore Collections)
 
 ### 5.1. `members`
-- `Member ID` (string, PK), `Name`, `Mobile`, `Email`, `Role`, `Classification`, `Blood Group`, `Birthday`, `Anniversary`, `Join Date`, `Password/PIN`, `Image`
+- `Member ID` (string, PK), `Name`, `Mobile`, `Email`, `Role`, `Classification`, `Blood Group`, `Birthday`, `Anniversary`, `Join Date`, `Password/PIN`, `Image`, `subscriptionStatus` (Free/Premium), `Firm Name`, `Industry`
 
 ### 5.2. `events`
 - `Event ID` (string, PK), `Event Name`, `Date`, `Time`, `Venue`, `Type`, `Description`
